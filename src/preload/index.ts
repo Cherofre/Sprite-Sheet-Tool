@@ -4,6 +4,7 @@ import type { DesktopApi } from '@shared/types'
 
 const api: DesktopApi = {
   chooseDirectory: (title) => ipcRenderer.invoke('directory:choose', title),
+  deletePaths: (paths) => ipcRenderer.invoke('paths:delete', paths),
   getPathForDroppedFile: (file) => webUtils.getPathForFile(file),
   loadDirectory: (dirPath) => ipcRenderer.invoke('directory:load', dirPath),
   loadFiles: (paths) => ipcRenderer.invoke('files:load', paths),

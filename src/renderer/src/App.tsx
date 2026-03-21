@@ -39,10 +39,27 @@ interface OperationController {
   id: number
 }
 
+interface OperationConfig {
+  cancelledMessage?: string
+  onCancelled?: () => Promise<void>
+}
+
 interface SmokeBridge {
   exportSequence: () => Promise<void>
   importPaths: (paths: string[]) => Promise<void>
 }
+
+const shortcutRows = [
+  ['Space', '播放 / 暂停'],
+  ['Left / Right', '上一帧 / 下一帧'],
+  ['Delete / Backspace', '删除选中帧'],
+  ['Ctrl/Cmd + Z', '撤销'],
+  ['Ctrl/Cmd + Shift + Z', '重做'],
+  ['Ctrl/Cmd + Y', '重做'],
+  ['Ctrl/Cmd + O', '导入文件'],
+  ['Ctrl/Cmd + Shift + O', '导入文件夹'],
+  ['Esc', '关闭说明或取消当前任务']
+] as const
 
 const joinPath = (directory: string, fileName: string): string => `${directory.replace(/[\\/]+$/, '')}/${fileName}`
 
@@ -186,6 +203,7 @@ export default function App() {
 
   const currentFrame = frames[playback.currentFrame]
   const canClear = frames.length > 0 || sheet.enabled
+  const [isHelpOpen, setIsHelpOpen] = useState(false)
   const [pingPongDirection, setPingPongDirection] = useState<1 | -1>(1)
   const [isWindowDragActive, setIsWindowDragActive] = useState(false)
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null)
@@ -276,9 +294,11 @@ export default function App() {
   const withOperation = async <T,>(
     initial: OperationProgressState,
     task: (controller: OperationController) => Promise<T>,
-    cancelledMessage = '已取消当前任务。'
+    config: string | OperationConfig = '已取消当前任务。'
   ): Promise<T | undefined> => {
     const controller = beginOperationProgress(initial)
+    const cancelledMessage = typeof config === 'string' ? config : (config.cancelledMessage ?? '已取消当前任务。')
+    const onCancelled = typeof config === 'string' ? undefined : config.onCancelled
 
     try {
       await waitForPaint()
@@ -287,6 +307,16 @@ export default function App() {
       return result
     } catch (error) {
       if (isCancelledError(error)) {
+        if (onCancelled) {
+          setOperationProgress({
+            cancellable: false,
+            detail: '正在清理已写出的文件，请稍候...',
+            percent: null,
+            title: '正在收尾'
+          })
+          await waitForPaint()
+          await onCancelled()
+        }
         setStatusMessage(cancelledMessage)
         return undefined
       }
@@ -320,7 +350,8 @@ export default function App() {
     directory: string,
     framesToWrite: FrameItem[],
     stage: 'export-sequence' | 'export-split-sequence',
-    controller: OperationController
+    controller: OperationController,
+    writtenPaths: string[] = []
   ): Promise<void> => {
     for (let index = 0; index < framesToWrite.length; index += 1) {
       ensureOperationActive(controller)
@@ -329,10 +360,12 @@ export default function App() {
       ensureOperationActive(controller)
 
       const fileName = buildExportFileName(exportSettings.fileNamePrefix, index, exportSettings.padding, exportSettings.imageFormat)
+      const filePath = joinPath(directory, fileName)
       await window.desktopApi.writeBinaryFile({
         data: Array.from(bytes),
-        filePath: joinPath(directory, fileName)
+        filePath
       })
+      writtenPaths.push(filePath)
 
       await updateOperationProgress(controller, {
         current: index + 1,
@@ -341,6 +374,14 @@ export default function App() {
         total: framesToWrite.length
       })
     }
+  }
+
+  const cleanupExportArtifacts = async (writtenPaths: string[]): Promise<void> => {
+    if (writtenPaths.length === 0) {
+      return
+    }
+
+    await window.desktopApi.deletePaths(writtenPaths)
   }
 
   const importPaths = async (paths: string[]): Promise<void> => {
@@ -586,6 +627,8 @@ export default function App() {
       return
     }
 
+    const writtenPaths: string[] = []
+
     await withOperation(
       {
         cancellable: true,
@@ -594,10 +637,15 @@ export default function App() {
         title: '正在导出图片'
       },
       async (controller) => {
-        await exportFramesToDirectory(directory, exportFrames, 'export-sequence', controller)
+        await exportFramesToDirectory(directory, exportFrames, 'export-sequence', controller, writtenPaths)
         setStatusMessage(`已导出 ${exportFrames.length} 张图片到 ${directory}`)
       },
-      '已取消导出图片序列。'
+      {
+        cancelledMessage: writtenPaths.length > 0 ? '已取消导出图片序列，并清理已写出的文件。' : '已取消导出图片序列。',
+        onCancelled: async () => {
+          await cleanupExportArtifacts(writtenPaths)
+        }
+      }
     )
   }
 
@@ -612,6 +660,8 @@ export default function App() {
     if (!directory) {
       return
     }
+
+    const writtenPaths: string[] = []
 
     await withOperation(
       {
@@ -633,10 +683,15 @@ export default function App() {
         )
 
         ensureOperationActive(controller)
-        await exportFramesToDirectory(directory, splitFrames, 'export-split-sequence', controller)
+        await exportFramesToDirectory(directory, splitFrames, 'export-split-sequence', controller, writtenPaths)
         setStatusMessage(`已导出 ${splitFrames.length} 张拆分图片到 ${directory}`)
       },
-      '已取消拆分导出。'
+      {
+        cancelledMessage: writtenPaths.length > 0 ? '已取消拆分导出，并清理已写出的文件。' : '已取消拆分导出。',
+        onCancelled: async () => {
+          await cleanupExportArtifacts(writtenPaths)
+        }
+      }
     )
   }
 
@@ -748,6 +803,16 @@ export default function App() {
   }
 
   const handleGlobalKeydown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === 'Escape' && isHelpOpen) {
+      event.preventDefault()
+      setIsHelpOpen(false)
+      return
+    }
+
+    if (isHelpOpen) {
+      return
+    }
+
     if (event.key === 'Escape' && isBusy) {
       event.preventDefault()
       cancelCurrentOperation()
@@ -763,6 +828,12 @@ export default function App() {
     }
 
     const isPrimaryModifier = event.ctrlKey || event.metaKey
+
+    if (event.key === 'F1') {
+      event.preventDefault()
+      setIsHelpOpen(true)
+      return
+    }
 
     if (isPrimaryModifier && event.key.toLowerCase() === 'o') {
       event.preventDefault()
@@ -959,7 +1030,12 @@ export default function App() {
           <span className="eyebrow-header">桌面工具链</span>
           <h1>序列图工具</h1>
         </div>
-        <p>面向游戏特效师的高密度桌面工作台，支持快速导入、自动识别、预览拆分与稳定导出。</p>
+        <div className="app-header-right">
+          <p>面向游戏特效师的高密度桌面工作台，支持快速导入、自动识别、预览拆分与稳定导出。</p>
+          <button className="header-button" onClick={() => setIsHelpOpen(true)} type="button">
+            快捷键 / 说明
+          </button>
+        </div>
       </header>
 
       {errorMessage ? (
@@ -1088,6 +1164,47 @@ export default function App() {
                 </button>
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {isHelpOpen ? (
+        <div className="modal-overlay" onClick={() => setIsHelpOpen(false)}>
+          <div
+            className="modal-card"
+            onClick={(event) => {
+              event.stopPropagation()
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">帮助</span>
+                <h2>快捷键与说明</h2>
+              </div>
+              <button className="secondary-button" onClick={() => setIsHelpOpen(false)} type="button">
+                关闭
+              </button>
+            </div>
+
+            <div className="help-grid">
+              {shortcutRows.map(([shortcut, description]) => (
+                <div className="help-row" key={shortcut}>
+                  <kbd>{shortcut}</kbd>
+                  <span>{description}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="hint-card">
+              <span className="eyebrow">补充说明</span>
+              <p>
+                1. `Esc` 会优先关闭当前说明窗口，其次取消正在执行的长任务。
+                <br />
+                2. 图片序列与拆分序列导出如果中途取消，会自动清理这次已写出的半成品文件。
+                <br />
+                3. 在输入框或下拉框里编辑时，快捷键不会抢占你的输入。
+              </p>
+            </div>
           </div>
         </div>
       ) : null}

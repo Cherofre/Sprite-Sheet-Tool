@@ -129,6 +129,18 @@ export const registerIpcHandlers = (): void => {
     return loadSupportedFiles(flattenedPaths)
   })
 
+  ipcMain.handle('paths:delete', async (_event, paths: string[]) => {
+    await Promise.all(
+      paths.map(async (targetPath) => {
+        if (!targetPath) {
+          return
+        }
+
+        await fs.rm(targetPath, { force: true }).catch(() => undefined)
+      })
+    )
+  })
+
   ipcMain.handle('directory:load', async (_event, dirPath: string) => {
     const files = await flattenPaths([dirPath])
     return loadSupportedFiles(files)

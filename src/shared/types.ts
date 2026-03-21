@@ -91,6 +91,7 @@ export interface WriteFileInput {
 
 export interface DesktopApi {
   chooseDirectory(title?: string): Promise<string | null>
+  deletePaths(paths: string[]): Promise<void>
   getPathForDroppedFile(file: File): string
   loadDirectory(dirPath: string): Promise<ImportedFilePayload[]>
   loadFiles(paths: string[]): Promise<ImportedFilePayload[]>

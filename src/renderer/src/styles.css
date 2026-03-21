@@ -151,6 +151,19 @@ button:disabled {
   text-align: right;
 }
 
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.header-button {
+  flex-shrink: 0;
+  min-height: 30px;
+  padding-inline: 0.8rem;
+}
+
 .eyebrow {
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.05);
@@ -721,6 +734,80 @@ label {
   line-height: 1.45;
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  background: rgba(7, 10, 13, 0.74);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.modal-card {
+  width: min(560px, 100%);
+  max-height: min(80vh, 760px);
+  overflow: auto;
+  background: rgba(24, 30, 36, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.38);
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem 1.05rem;
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modal-header h2 {
+  margin: 0.25rem 0 0;
+  color: #fff;
+  font-size: 1.02rem;
+}
+
+.help-grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.help-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) 1fr;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.help-row span {
+  color: var(--text-main);
+  font-size: 0.82rem;
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0.18rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+}
+
 @media (max-width: 1024px) {
   body {
     overflow: auto;
@@ -758,6 +845,12 @@ label {
     text-align: left;
   }
 
+  .app-header-right {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
   .button-grid,
   .button-row,
   .dual-action-row,
@@ -767,6 +860,10 @@ label {
   .zoom-grid,
   .split-sample-grid,
   .action-grid-three {
+    grid-template-columns: 1fr;
+  }
+
+  .help-row {
     grid-template-columns: 1fr;
   }
 }
