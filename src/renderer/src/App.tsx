@@ -69,6 +69,15 @@ const readFileAsDataUrl = async (file: File): Promise<string> =>
     reader.readAsDataURL(file)
   })
 
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  const tagName = target.tagName
+  return target.isContentEditable || tagName === 'INPUT' || tagName === 'SELECT' || tagName === 'TEXTAREA'
+}
+
 const getSheetGeometry = (sheet: SheetState) => {
   if (!sheet.source || sheet.sourceWidth <= 0 || sheet.sourceHeight <= 0) {
     return {
@@ -737,6 +746,80 @@ export default function App() {
     setPingPongDirection(1)
     resetWorkspace()
   }
+
+  const handleGlobalKeydown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === 'Escape' && isBusy) {
+      event.preventDefault()
+      cancelCurrentOperation()
+      return
+    }
+
+    if (isBusy) {
+      return
+    }
+
+    if (isEditableTarget(event.target)) {
+      return
+    }
+
+    const isPrimaryModifier = event.ctrlKey || event.metaKey
+
+    if (isPrimaryModifier && event.key.toLowerCase() === 'o') {
+      event.preventDefault()
+      if (event.shiftKey) {
+        void handleImportFolder()
+      } else {
+        void handleImportFiles()
+      }
+      return
+    }
+
+    if (isPrimaryModifier && event.key.toLowerCase() === 'z') {
+      event.preventDefault()
+      if (event.shiftKey) {
+        redo()
+      } else {
+        undo()
+      }
+      return
+    }
+
+    if (isPrimaryModifier && event.key.toLowerCase() === 'y') {
+      event.preventDefault()
+      redo()
+      return
+    }
+
+    if (event.key === ' ' || event.code === 'Space') {
+      event.preventDefault()
+      handleTogglePlay()
+      return
+    }
+
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      handlePrevious()
+      return
+    }
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      handleNext()
+      return
+    }
+
+    if ((event.key === 'Delete' || event.key === 'Backspace') && selectedFrameIds.length > 0 && !isBusy) {
+      event.preventDefault()
+      deleteSelectedFrames()
+    }
+  })
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleGlobalKeydown)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeydown)
+    }
+  }, [handleGlobalKeydown])
 
   const advancePlayback = useEffectEvent(() => {
     if (playbackSequence.length === 0) {
