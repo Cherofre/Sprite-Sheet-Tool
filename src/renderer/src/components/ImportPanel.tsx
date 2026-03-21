@@ -123,10 +123,6 @@ export function ImportPanel({
         <span className="eyebrow">状态</span>
         <span>{statusMessage}</span>
       </div>
-      <div className="hint-card">
-        <span className="eyebrow">快捷键</span>
-        <p>空格播放 / 左右切帧 / Delete 删选中 / Ctrl+Z 撤销 / Ctrl+Shift+O 导入文件夹 / Esc 取消任务</p>
-      </div>
     </section>
   )
 }

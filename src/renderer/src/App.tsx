@@ -157,6 +157,8 @@ const buildProgressState = (progress: TaskProgress): OperationProgressState => {
       return { cancellable: true, detail: `正在生成帧数据${formattedCount}`, percent: progress.percent ?? null, title: '正在导入资源' }
     case 'rotate-frames':
       return { cancellable: true, detail: `正在旋转帧${formattedCount}`, percent: progress.percent ?? null, title: '正在旋转序列' }
+    case 'compose-sheet':
+      return { cancellable: true, detail: `正在合并图集帧${formattedCount}`, percent: progress.percent ?? null, title: '正在导出序列图' }
     case 'encode-gif':
       return { cancellable: true, detail: `正在编码 GIF${formattedCount}`, percent: progress.percent ?? null, title: '正在导出 GIF' }
     case 'export-sequence':
@@ -710,17 +712,29 @@ export default function App() {
       {
         cancellable: true,
         detail: `正在按 ${layout.rows} x ${layout.columns} 合并帧...`,
-        percent: 15,
+        percent: 0,
         title: '正在导出序列图'
       },
       async (controller) => {
-        const { canvas } = await composeSpriteSheet(exportFrames, layout.rows, layout.columns)
+        const { canvas } = await composeSpriteSheet(exportFrames, layout.rows, layout.columns, async (progress) => {
+          const formattedCount =
+            typeof progress.current === 'number' && typeof progress.total === 'number'
+              ? ` (${progress.current}/${progress.total})`
+              : ''
+
+          await updateOperationProgress(controller, {
+            cancellable: true,
+            detail: `正在合并图集帧${formattedCount}`,
+            percent: ((progress.percent ?? 0) / 100) * 78,
+            title: '正在导出序列图'
+          })
+        })
         ensureOperationActive(controller)
 
         await updateOperationProgress(controller, {
           cancellable: true,
           detail: '正在编码图像...',
-          percent: 72,
+          percent: 84,
           title: '正在导出序列图'
         })
 
@@ -730,7 +744,7 @@ export default function App() {
         await updateOperationProgress(controller, {
           cancellable: true,
           detail: '正在写入输出文件...',
-          percent: 92,
+          percent: 96,
           title: '正在导出序列图'
         })
 

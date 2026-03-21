@@ -1,6 +1,10 @@
 import type { ExportImageFormat, FrameItem, ImportedFilePayload, ProgressCallback, RotationStep } from '@shared/types'
 
 import { stripExtension } from '@lib/fs/fileNames'
+import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
+import { runImageWorkerTask, supportsImageWorker } from '@lib/image/worker.client'
+
+import type { ComposeSheetWorkerResult } from './imageWorkerTypes'
 
 const MIME_BY_FORMAT: Record<ExportImageFormat, string> = {
   jpeg: 'image/jpeg',
@@ -134,7 +138,7 @@ export const filePayloadToFrame = async (
   }
 }
 
-export const splitSheetToFrames = async (
+const splitSheetToFramesInRenderer = async (
   payload: ImportedFilePayload,
   rows: number,
   columns: number,
@@ -181,8 +185,8 @@ export const splitSheetToFrames = async (
         width: frameWidth
       })
 
-      if (onProgress) {
-        const processed = index + 1
+      const processed = index + 1
+      if (onProgress && shouldReportProgress(processed, totalFrames)) {
         await onProgress({
           current: processed,
           percent: (processed / totalFrames) * 100,
@@ -190,13 +194,15 @@ export const splitSheetToFrames = async (
           total: totalFrames
         })
       }
+
+      await maybeYieldToBrowser(processed)
     }
   }
 
   return frames
 }
 
-export const rotateFrames = async (
+const rotateFramesInRenderer = async (
   frames: FrameItem[],
   rotation: RotationStep,
   onProgress?: ProgressCallback
@@ -232,8 +238,8 @@ export const rotateFrames = async (
       width: canvas.width
     })
 
-    if (onProgress) {
-      const processed = index + 1
+    const processed = index + 1
+    if (onProgress && shouldReportProgress(processed, frames.length)) {
       await onProgress({
         current: processed,
         percent: (processed / frames.length) * 100,
@@ -241,15 +247,18 @@ export const rotateFrames = async (
         total: frames.length
       })
     }
+
+    await maybeYieldToBrowser(processed)
   }
 
   return rotatedFrames
 }
 
-export const composeSpriteSheet = async (
+const composeSpriteSheetInRenderer = async (
   frames: FrameItem[],
   rows: number,
-  columns: number
+  columns: number,
+  onProgress?: ProgressCallback
 ): Promise<{ canvas: HTMLCanvasElement; cellHeight: number; cellWidth: number }> => {
   const cellWidth = Math.max(...frames.map((frame) => frame.width))
   const cellHeight = Math.max(...frames.map((frame) => frame.height))
@@ -264,24 +273,130 @@ export const composeSpriteSheet = async (
 
   context.clearRect(0, 0, canvas.width, canvas.height)
 
-  await Promise.all(
-    frames.map(async (frame, index) => {
-      const image = await loadImageElement(frame.dataUrl)
-      const row = Math.floor(index / columns)
-      const column = index % columns
-      const scale = Math.min(cellWidth / image.naturalWidth, cellHeight / image.naturalHeight, 1)
-      const drawWidth = Math.max(1, Math.round(image.naturalWidth * scale))
-      const drawHeight = Math.max(1, Math.round(image.naturalHeight * scale))
-      const x = column * cellWidth + Math.floor((cellWidth - drawWidth) / 2)
-      const y = row * cellHeight + Math.floor((cellHeight - drawHeight) / 2)
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index]
+    const image = await loadImageElement(frame.dataUrl)
+    const row = Math.floor(index / columns)
+    const column = index % columns
+    const scale = Math.min(cellWidth / image.naturalWidth, cellHeight / image.naturalHeight, 1)
+    const drawWidth = Math.max(1, Math.round(image.naturalWidth * scale))
+    const drawHeight = Math.max(1, Math.round(image.naturalHeight * scale))
+    const x = column * cellWidth + Math.floor((cellWidth - drawWidth) / 2)
+    const y = row * cellHeight + Math.floor((cellHeight - drawHeight) / 2)
 
-      context.drawImage(image, x, y, drawWidth, drawHeight)
-    })
-  )
+    context.drawImage(image, x, y, drawWidth, drawHeight)
+
+    const processed = index + 1
+    if (onProgress && shouldReportProgress(processed, frames.length)) {
+      await onProgress({
+        current: processed,
+        percent: (processed / frames.length) * 100,
+        stage: 'compose-sheet',
+        total: frames.length
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
+  }
 
   return {
     canvas,
     cellHeight,
     cellWidth
   }
+}
+
+export const splitSheetToFrames = async (
+  payload: ImportedFilePayload,
+  rows: number,
+  columns: number,
+  frameWidth: number,
+  frameHeight: number,
+  onProgress?: ProgressCallback
+): Promise<FrameItem[]> => {
+  if (supportsImageWorker()) {
+    try {
+      return await runImageWorkerTask<FrameItem[]>(
+        {
+          columns,
+          frameHeight,
+          frameWidth,
+          kind: 'split-sheet',
+          payload,
+          rows
+        },
+        onProgress
+      )
+    } catch {
+      // Fall through to the main-thread implementation when workers are unavailable or fail.
+    }
+  }
+
+  return splitSheetToFramesInRenderer(payload, rows, columns, frameWidth, frameHeight, onProgress)
+}
+
+export const rotateFrames = async (
+  frames: FrameItem[],
+  rotation: RotationStep,
+  onProgress?: ProgressCallback
+): Promise<FrameItem[]> => {
+  if (supportsImageWorker()) {
+    try {
+      return await runImageWorkerTask<FrameItem[]>(
+        {
+          frames,
+          kind: 'rotate-frames',
+          rotation
+        },
+        onProgress
+      )
+    } catch {
+      // Fall through to the main-thread implementation when workers are unavailable or fail.
+    }
+  }
+
+  return rotateFramesInRenderer(frames, rotation, onProgress)
+}
+
+export const composeSpriteSheet = async (
+  frames: FrameItem[],
+  rows: number,
+  columns: number,
+  onProgress?: ProgressCallback
+): Promise<{ canvas: HTMLCanvasElement; cellHeight: number; cellWidth: number }> => {
+  if (supportsImageWorker()) {
+    try {
+      const workerResult = await runImageWorkerTask<ComposeSheetWorkerResult>(
+        {
+          columns,
+          frames,
+          kind: 'compose-sheet',
+          rows
+        },
+        onProgress
+      )
+
+      const image = await loadImageElement(workerResult.dataUrl)
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) {
+        throw new Error('Canvas is unavailable')
+      }
+
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(image, 0, 0)
+
+      return {
+        canvas,
+        cellHeight: workerResult.cellHeight,
+        cellWidth: workerResult.cellWidth
+      }
+    } catch {
+      // Fall through to the main-thread implementation when workers are unavailable or fail.
+    }
+  }
+
+  return composeSpriteSheetInRenderer(frames, rows, columns, onProgress)
 }

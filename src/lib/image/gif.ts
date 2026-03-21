@@ -4,6 +4,7 @@ import { decompressFrames, parseGIF } from 'gifuct-js'
 import type { FrameItem, ImportedFilePayload, ProgressCallback } from '@shared/types'
 
 import { stripExtension } from '@lib/fs/fileNames'
+import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
 
 import { loadImageElement } from './browser'
 
@@ -57,8 +58,8 @@ export const decodeGifToFrames = async (
       context.clearRect(frame.dims.left, frame.dims.top, frame.dims.width, frame.dims.height)
     }
 
-    if (onProgress) {
-      const processed = index + 1
+    const processed = index + 1
+    if (onProgress && shouldReportProgress(processed, parsedFrames.length)) {
       await onProgress({
         current: processed,
         percent: (processed / parsedFrames.length) * 100,
@@ -66,6 +67,8 @@ export const decodeGifToFrames = async (
         total: parsedFrames.length
       })
     }
+
+    await maybeYieldToBrowser(processed)
   }
 
   return {
@@ -119,8 +122,8 @@ export const encodeGif = async (
       transparentIndex: 0
     })
 
-    if (onProgress) {
-      const processed = index + 1
+    const processed = index + 1
+    if (onProgress && shouldReportProgress(processed, frames.length)) {
       await onProgress({
         current: processed,
         percent: (processed / frames.length) * 100,
@@ -128,6 +131,8 @@ export const encodeGif = async (
         total: frames.length
       })
     }
+
+    await maybeYieldToBrowser(processed)
   }
 
   encoder.finish()
