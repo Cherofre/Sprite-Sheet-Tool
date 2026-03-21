@@ -43,16 +43,11 @@ function SortableFrameCard({ currentFrame, frame, index, isSelected, onSelectFra
         transform: CSS.Transform.toString(transform),
         transition
       }}
+      title={`${frame.name}\n尺寸: ${frame.width} x ${frame.height}`}
       type="button"
     >
+      <span className="timeline-index">{index + 1}</span>
       <img alt={frame.name} className="timeline-thumb" draggable={false} src={frame.dataUrl} />
-      <div className="timeline-meta">
-        <strong>{index + 1}</strong>
-        <span>{frame.name}</span>
-        <small>
-          {frame.width} x {frame.height}
-        </small>
-      </div>
     </button>
   )
 }

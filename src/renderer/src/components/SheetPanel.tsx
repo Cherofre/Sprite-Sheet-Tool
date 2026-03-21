@@ -190,18 +190,30 @@ export function SheetPanel({
       </div>
 
       {sheet.candidates.length > 0 ? (
-        <div className="candidate-list">
+        <div className="control-block">
           <div className="section-heading compact">
             <span className="eyebrow">自动识别</span>
             <h3>候选方案</h3>
           </div>
-
-          {sheet.candidates.map((candidate) => (
-            <button className="candidate-button" key={candidate.label} onClick={() => onChooseCandidate(candidate)} type="button">
-              <strong>{candidate.label}</strong>
-              <span>置信度 {(candidate.confidence * 100).toFixed(0)}%</span>
-            </button>
-          ))}
+          <select
+            defaultValue=""
+            onChange={(event) => {
+              const selected = sheet.candidates.find((candidate) => candidate.label === event.target.value)
+              if (selected) {
+                onChooseCandidate(selected)
+              }
+              event.currentTarget.selectedIndex = 0
+            }}
+          >
+            <option disabled value="">
+              -- 选择其他候选方案 --
+            </option>
+            {sheet.candidates.map((candidate) => (
+              <option key={candidate.label} value={candidate.label}>
+                {candidate.label} (置信度 {(candidate.confidence * 100).toFixed(0)}%)
+              </option>
+            ))}
+          </select>
         </div>
       ) : null}
     </section>

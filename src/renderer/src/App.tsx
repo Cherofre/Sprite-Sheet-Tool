@@ -1046,9 +1046,41 @@ export default function App() {
         </div>
         <div className="app-header-right">
           <p>面向游戏特效师的高密度桌面工作台，支持快速导入、自动识别、预览拆分与稳定导出。</p>
-          <button className="header-button" onClick={() => setIsHelpOpen(true)} type="button">
-            快捷键 / 说明
-          </button>
+          <div className="header-actions">
+            <div className="top-toolbar">
+              <button
+                className="secondary-button"
+                disabled={isBusy}
+                onClick={() => {
+                  void handleImportFiles()
+                }}
+                type="button"
+              >
+                导入文件
+              </button>
+              <button
+                className="secondary-button"
+                disabled={isBusy}
+                onClick={() => {
+                  void handleImportFolder()
+                }}
+                type="button"
+              >
+                导入文件夹
+              </button>
+              <button
+                className="secondary-button"
+                disabled={!canClear || isBusy}
+                onClick={handleClearWorkspace}
+                type="button"
+              >
+                清空
+              </button>
+            </div>
+            <button className="header-button" onClick={() => setIsHelpOpen(true)} type="button">
+              快捷键 / 说明
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1064,22 +1096,11 @@ export default function App() {
       <div className="app-grid">
         <aside className="sidebar-column">
           <ImportPanel
-            canClear={canClear}
             canRedo={canRedo}
             canUndo={canUndo}
             frameCount={frames.length}
             isBusy={isBusy}
-            onClearWorkspace={handleClearWorkspace}
             onDeleteSelected={deleteSelectedFrames}
-            onDropFiles={(files) => {
-              void importDroppedFiles(files)
-            }}
-            onImportFiles={() => {
-              void handleImportFiles()
-            }}
-            onImportFolder={() => {
-              void handleImportFolder()
-            }}
             onRedo={redo}
             onReverse={reverseFrames}
             onRotate={(rotation) => {
@@ -1112,25 +1133,111 @@ export default function App() {
         </aside>
 
         <main className="preview-column">
-          <PreviewStage background={playback.background} frame={currentFrame} zoom={playback.zoom} />
-          <FrameTimeline
-            currentFrame={playback.currentFrame}
-            frames={frames}
-            onMoveFrame={moveFrame}
-            onSelectFrame={selectFrame}
-            selectedFrameIds={selectedFrameIds}
-          />
+          {frames.length === 0 && !sheet.source ? (
+            <div
+              className="empty-workspace-drop"
+              onDragOver={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                const droppedFiles = Array.from(event.dataTransfer.files)
+                if (droppedFiles.length > 0) {
+                  void importDroppedFiles(droppedFiles)
+                }
+              }}
+            >
+              <h2>开始创作</h2>
+              <p>将图片、GIF 动图或文件夹拖拽到这里</p>
+              <div className="button-grid">
+                <button
+                  className="primary-button"
+                  onClick={() => {
+                    void handleImportFiles()
+                  }}
+                  type="button"
+                >
+                  选择文件
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    void handleImportFolder()
+                  }}
+                  type="button"
+                >
+                  选择文件夹
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <PreviewStage background={playback.background} frame={currentFrame} zoom={playback.zoom} />
+
+              <div className="viewport-toolbar">
+                <div className="vt-group">
+                  <select
+                    className="toolbar-select"
+                    onChange={(event) => updatePlaybackSettings({ background: event.target.value as typeof playback.background }, false)}
+                    value={playback.background}
+                  >
+                    <option value="checker">背景: 棋盘</option>
+                    <option value="black">背景: 纯黑</option>
+                    <option value="white">背景: 纯白</option>
+                  </select>
+                  <select
+                    className="toolbar-select"
+                    onChange={(event) =>
+                      updatePlaybackSettings(
+                        { zoom: event.target.value === 'fit' ? 'fit' : Number(event.target.value) },
+                        false
+                      )
+                    }
+                    value={String(playback.zoom)}
+                  >
+                    <option value="fit">缩放: 适应</option>
+                    <option value="50">50%</option>
+                    <option value="100">100%</option>
+                    <option value="200">200%</option>
+                    <option value="400">400%</option>
+                  </select>
+                </div>
+
+                <div className="vt-group vt-center">
+                  <button className="toolbar-btn" disabled={frames.length === 0} onClick={handlePrevious} type="button">
+                    |◀
+                  </button>
+                  <button className="toolbar-btn play-btn" disabled={frames.length === 0} onClick={handleTogglePlay} type="button">
+                    {playback.isPlaying ? '暂停' : '播放'}
+                  </button>
+                  <button className="toolbar-btn" disabled={frames.length === 0} onClick={handleNext} type="button">
+                    ▶|
+                  </button>
+                </div>
+
+                <div className="vt-group vt-right">
+                  <span>{frames.length === 0 ? '0 / 0' : `${playback.currentFrame + 1} / ${frames.length} 帧`}</span>
+                </div>
+              </div>
+
+              <FrameTimeline
+                currentFrame={playback.currentFrame}
+                frames={frames}
+                onMoveFrame={moveFrame}
+                onSelectFrame={selectFrame}
+                selectedFrameIds={selectedFrameIds}
+              />
+            </>
+          )}
         </main>
 
         <aside className="sidebar-column">
           <PlaybackPanel
             frameCount={frames.length}
-            onNext={handleNext}
-            onPrevious={handlePrevious}
-            onTogglePlay={handleTogglePlay}
             onUpdatePlayback={updatePlaybackSettings}
             playback={playback}
-            sequenceCount={playbackSequence.length}
           />
 
           <ExportPanel

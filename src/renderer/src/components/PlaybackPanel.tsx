@@ -2,42 +2,18 @@ import type { PlaybackSettings } from '@shared/types'
 
 interface PlaybackPanelProps {
   frameCount: number
-  onNext: () => void
-  onPrevious: () => void
-  onTogglePlay: () => void
   onUpdatePlayback: (patch: Partial<PlaybackSettings>, recordHistory?: boolean) => void
   playback: PlaybackSettings
-  sequenceCount: number
 }
 
 const parsePositiveInteger = (value: string): number => Math.max(0, Number.parseInt(value || '0', 10) || 0)
 
-export function PlaybackPanel({
-  frameCount,
-  onNext,
-  onPrevious,
-  onTogglePlay,
-  onUpdatePlayback,
-  playback,
-  sequenceCount
-}: PlaybackPanelProps) {
+export function PlaybackPanel({ frameCount, onUpdatePlayback, playback }: PlaybackPanelProps) {
   return (
     <section className="panel stack">
       <div className="section-heading">
-        <span className="eyebrow">预览</span>
-        <h2>播放控制</h2>
-      </div>
-
-      <div className="transport-row">
-        <button className="secondary-button" disabled={frameCount === 0} onClick={onPrevious} type="button">
-          上一帧
-        </button>
-        <button className="primary-button" disabled={frameCount === 0} onClick={onTogglePlay} type="button">
-          {playback.isPlaying ? '暂停' : '播放'}
-        </button>
-        <button className="secondary-button" disabled={frameCount === 0} onClick={onNext} type="button">
-          下一帧
-        </button>
+        <span className="eyebrow">参数</span>
+        <h2>播放设置</h2>
       </div>
 
       <div className="control-block">
@@ -112,52 +88,8 @@ export function PlaybackPanel({
           onClick={() => onUpdatePlayback({ reverse: !playback.reverse })}
           type="button"
         >
-          倒放
+          启用倒放
         </button>
-      </div>
-
-      <div className="section-heading compact">
-        <span className="eyebrow">视图</span>
-        <h3>背景与缩放</h3>
-      </div>
-
-      <div className="toggle-group">
-        {(['checker', 'black', 'white'] as const).map((background) => (
-          <button
-            className={playback.background === background ? 'toggle-button active' : 'toggle-button'}
-            key={background}
-            onClick={() => onUpdatePlayback({ background }, false)}
-            type="button"
-          >
-            {background === 'checker' ? '棋盘' : background === 'black' ? '黑色' : '白色'}
-          </button>
-        ))}
-      </div>
-
-      <div className="zoom-grid">
-        {(['fit', 50, 100, 200, 400] as const).map((zoom) => (
-          <button
-            className={playback.zoom === zoom ? 'toggle-button active' : 'toggle-button'}
-            key={String(zoom)}
-            onClick={() => onUpdatePlayback({ zoom }, false)}
-            type="button"
-          >
-            {zoom === 'fit' ? '适应' : `${zoom}%`}
-          </button>
-        ))}
-      </div>
-
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span>当前帧</span>
-          <strong>
-            {frameCount === 0 ? '0 / 0' : `${playback.currentFrame + 1} / ${frameCount}`}
-          </strong>
-        </div>
-        <div className="stat-card">
-          <span>可播帧数</span>
-          <strong>{sequenceCount}</strong>
-        </div>
       </div>
     </section>
   )
