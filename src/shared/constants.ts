@@ -1,6 +1,6 @@
 import type { BackgroundMode, ExportImageFormat, LoopMode } from './types'
 
-export const APP_NAME = 'Sprite Sheet Tool'
+export const APP_NAME = '序列图工具'
 
 export const SUPPORTED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif'] as const
 

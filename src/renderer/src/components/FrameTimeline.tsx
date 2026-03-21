@@ -82,7 +82,7 @@ export function FrameTimeline({
       </div>
 
       {frames.length === 0 ? (
-        <div className="empty-timeline">导入后的帧会出现在这里，可以直接拖动缩略图重新排序。</div>
+        <div className="empty-timeline">导入后的帧会出现在这里，你可以直接拖动缩略图重新排序。</div>
       ) : (
         <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd} sensors={sensors}>
           <SortableContext items={frames.map((frame) => frame.id)} strategy={horizontalListSortingStrategy}>

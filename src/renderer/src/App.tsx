@@ -1,9 +1,9 @@
 import { startTransition, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 
 import { SUPPORTED_EXTENSIONS } from '@shared/constants'
-import type { ImportedFilePayload, TaskProgress, SheetState } from '@shared/types'
+import type { FrameItem, GridCandidate, ImportedFilePayload, SheetState, TaskProgress } from '@shared/types'
 
-import { buildExportFileName, buildExportSequence, buildSampledIndices } from '@features/export/plans'
+import { buildExportFileName, buildExportSequence } from '@features/export/plans'
 import { buildImportSession } from '@features/import/importSession'
 import { normalizeSheetLayout, recommendSheetLayout } from '@features/merge/layout'
 import { advanceSequencePosition, buildFrameSequence } from '@features/preview/frameSequence'
@@ -18,20 +18,33 @@ import { PreviewStage } from './components/PreviewStage'
 import { SheetPanel } from './components/SheetPanel'
 import { useCanRedo, useCanUndo, useEditorStore } from './store/editorStore'
 
+const OPERATION_CANCELLED = '__OPERATION_CANCELLED__'
+
 const saveFiltersByFormat = {
-  gif: [{ extensions: ['gif'], name: 'GIF' }],
-  jpeg: [{ extensions: ['jpg', 'jpeg'], name: 'JPEG' }],
-  png: [{ extensions: ['png'], name: 'PNG' }],
-  webp: [{ extensions: ['webp'], name: 'WEBP' }]
+  gif: [{ extensions: ['gif'], name: 'GIF 动图' }],
+  jpeg: [{ extensions: ['jpg', 'jpeg'], name: 'JPEG 图片' }],
+  png: [{ extensions: ['png'], name: 'PNG 图片' }],
+  webp: [{ extensions: ['webp'], name: 'WEBP 图片' }]
 }
 
-const joinPath = (directory: string, fileName: string): string => `${directory.replace(/[\\/]+$/, '')}/${fileName}`
-
 interface OperationProgressState {
+  cancellable: boolean
   detail: string
   percent: number | null
   title: string
 }
+
+interface OperationController {
+  cancelled: boolean
+  id: number
+}
+
+interface SmokeBridge {
+  exportSequence: () => Promise<void>
+  importPaths: (paths: string[]) => Promise<void>
+}
+
+const joinPath = (directory: string, fileName: string): string => `${directory.replace(/[\\/]+$/, '')}/${fileName}`
 
 const hasFileDrag = (dataTransfer?: DataTransfer | null): boolean =>
   Array.from(dataTransfer?.types ?? []).includes('Files')
@@ -107,67 +120,30 @@ const buildProgressState = (progress: TaskProgress): OperationProgressState => {
 
   switch (progress.stage) {
     case 'measure-sheet':
-      return {
-        detail: '正在读取图像尺寸与基础信息...',
-        percent: progress.percent ?? 10,
-        title: '正在分析图集'
-      }
+      return { cancellable: true, detail: '正在读取图像尺寸与基础信息...', percent: progress.percent ?? 10, title: '正在分析图集' }
     case 'rank-grid':
-      return {
-        detail: '正在评估规则网格候选...',
-        percent: progress.percent ?? 25,
-        title: '正在分析图集'
-      }
+      return { cancellable: true, detail: '正在评估规则网格候选...', percent: progress.percent ?? 25, title: '正在分析图集' }
     case 'split-sheet':
-      return {
-        detail: `正在切出图集帧${formattedCount}`,
-        percent: progress.percent ?? null,
-        title: '正在拆分图集'
-      }
+      return { cancellable: true, detail: `正在切出图集帧${formattedCount}`, percent: progress.percent ?? null, title: '正在拆分图集' }
     case 'decode-gif':
-      return {
-        detail: `正在解析 GIF 帧${formattedCount}`,
-        percent: progress.percent ?? null,
-        title: '正在导入 GIF'
-      }
+      return { cancellable: true, detail: `正在解析 GIF 帧${formattedCount}`, percent: progress.percent ?? null, title: '正在导入 GIF' }
     case 'convert-files':
-      return {
-        detail: `正在生成帧数据${formattedCount}`,
-        percent: progress.percent ?? null,
-        title: '正在导入资源'
-      }
+      return { cancellable: true, detail: `正在生成帧数据${formattedCount}`, percent: progress.percent ?? null, title: '正在导入资源' }
     case 'rotate-frames':
-      return {
-        detail: `正在旋转帧${formattedCount}`,
-        percent: progress.percent ?? null,
-        title: '正在旋转序列'
-      }
+      return { cancellable: true, detail: `正在旋转帧${formattedCount}`, percent: progress.percent ?? null, title: '正在旋转序列' }
     case 'encode-gif':
-      return {
-        detail: `正在编码 GIF${formattedCount}`,
-        percent: progress.percent ?? null,
-        title: '正在导出 GIF'
-      }
+      return { cancellable: true, detail: `正在编码 GIF${formattedCount}`, percent: progress.percent ?? null, title: '正在导出 GIF' }
     case 'export-sequence':
-      return {
-        detail: `正在导出图片序列${formattedCount}`,
-        percent: progress.percent ?? null,
-        title: '正在导出图片'
-      }
+      return { cancellable: true, detail: `正在导出图片序列${formattedCount}`, percent: progress.percent ?? null, title: '正在导出图片' }
     case 'export-split-sequence':
-      return {
-        detail: `正在导出拆分序列${formattedCount}`,
-        percent: progress.percent ?? null,
-        title: '正在导出拆分结果'
-      }
+      return { cancellable: true, detail: `正在导出拆分序列${formattedCount}`, percent: progress.percent ?? null, title: '正在导出拆分结果' }
     default:
-      return {
-        detail: progress.detail ?? '正在处理，请稍候...',
-        percent: progress.percent ?? null,
-        title: '正在处理图像'
-      }
+      return { cancellable: true, detail: progress.detail ?? '正在处理，请稍候...', percent: progress.percent ?? null, title: '正在处理图像' }
   }
 }
+
+const isCancelledError = (error: unknown): boolean =>
+  error instanceof Error && error.message === OPERATION_CANCELLED
 
 export default function App() {
   const frames = useEditorStore((state) => state.frames)
@@ -182,7 +158,9 @@ export default function App() {
   const clearError = useEditorStore((state) => state.clearError)
   const deleteSelectedFrames = useEditorStore((state) => state.deleteSelectedFrames)
   const moveFrame = useEditorStore((state) => state.moveFrame)
+  const redo = useEditorStore((state) => state.redo)
   const replaceFrames = useEditorStore((state) => state.replaceFrames)
+  const resetWorkspace = useEditorStore((state) => state.resetWorkspace)
   const reverseFrames = useEditorStore((state) => state.reverseFrames)
   const selectFrame = useEditorStore((state) => state.selectFrame)
   const setBusy = useEditorStore((state) => state.setBusy)
@@ -191,20 +169,19 @@ export default function App() {
   const setIsPlaying = useEditorStore((state) => state.setIsPlaying)
   const setStatusMessage = useEditorStore((state) => state.setStatusMessage)
   const undo = useEditorStore((state) => state.undo)
-  const redo = useEditorStore((state) => state.redo)
   const updateExportSettings = useEditorStore((state) => state.updateExportSettings)
   const updatePlaybackSettings = useEditorStore((state) => state.updatePlaybackSettings)
   const updateSheetSettings = useEditorStore((state) => state.updateSheetSettings)
   const canUndo = useCanUndo()
   const canRedo = useCanRedo()
+
   const currentFrame = frames[playback.currentFrame]
+  const canClear = frames.length > 0 || sheet.enabled
   const [pingPongDirection, setPingPongDirection] = useState<1 | -1>(1)
   const [isWindowDragActive, setIsWindowDragActive] = useState(false)
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null)
-  const smokeFnsRef = useRef<{
-    exportSequence: () => Promise<void>
-    importPaths: (paths: string[]) => Promise<void>
-  } | null>(null)
+  const operationRef = useRef<OperationController | null>(null)
+  const smokeFnsRef = useRef<SmokeBridge | null>(null)
   const windowDragDepthRef = useRef(0)
 
   const playbackSequence = useMemo(
@@ -217,7 +194,10 @@ export default function App() {
     [exportSettings, frames.length, playback]
   )
 
-  const exportFrames = exportSequence.map((index) => frames[index]).filter((frame): frame is NonNullable<typeof frame> => Boolean(frame))
+  const exportFrames = exportSequence
+    .map((index) => frames[index])
+    .filter((frame): frame is FrameItem => Boolean(frame))
+
   const recommendedLayout = recommendSheetLayout(exportFrames.length)
   const sheetGeometry = getSheetGeometry(sheet)
 
@@ -227,34 +207,536 @@ export default function App() {
     })
   }
 
-  const beginOperationProgress = async (title: string, detail: string, percent: number | null = 0): Promise<void> => {
+  const createCancelledError = (): Error => new Error(OPERATION_CANCELLED)
+
+  const ensureOperationActive = (controller: OperationController): void => {
+    if (controller.cancelled || operationRef.current?.id !== controller.id) {
+      throw createCancelledError()
+    }
+  }
+
+  const beginOperationProgress = (initial: OperationProgressState): OperationController => {
+    const controller = {
+      cancelled: false,
+      id: Date.now() + Math.floor(Math.random() * 1000)
+    }
+
+    operationRef.current = controller
+    clearError()
     setBusy(true)
-    setOperationProgress({ detail, percent, title })
-    await waitForPaint()
+    setOperationProgress(initial)
+    return controller
   }
 
-  const updateOperationProgress = async (progress: TaskProgress | OperationProgressState): Promise<void> => {
-    const nextState =
-      'stage' in progress
-        ? buildProgressState(progress)
-        : progress
-
-    setOperationProgress(nextState)
+  const updateOperationProgress = async (
+    controller: OperationController,
+    next: OperationProgressState | TaskProgress
+  ): Promise<void> => {
+    ensureOperationActive(controller)
+    setOperationProgress('stage' in next ? buildProgressState(next) : next)
     await waitForPaint()
+    ensureOperationActive(controller)
   }
 
-  const endOperationProgress = (): void => {
+  const endOperationProgress = (controller: OperationController): void => {
+    if (operationRef.current?.id !== controller.id) {
+      return
+    }
+
+    operationRef.current = null
     setOperationProgress(null)
     setBusy(false)
   }
 
-  useEffect(() => {
-    setPingPongDirection(1)
-
-    if (playbackSequence.length > 0 && !playbackSequence.includes(playback.currentFrame)) {
-      setCurrentFrame(playbackSequence[0])
+  const cancelCurrentOperation = useEffectEvent(() => {
+    const controller = operationRef.current
+    if (!controller || controller.cancelled) {
+      return
     }
-  }, [playback.currentFrame, playbackSequence, setCurrentFrame])
+
+    controller.cancelled = true
+    setOperationProgress({
+      cancellable: false,
+      detail: '正在尽快停止当前处理，请稍候...',
+      percent: null,
+      title: '正在取消任务'
+    })
+    setStatusMessage('正在取消当前任务...')
+  })
+
+  const withOperation = async <T,>(
+    initial: OperationProgressState,
+    task: (controller: OperationController) => Promise<T>,
+    cancelledMessage = '已取消当前任务。'
+  ): Promise<T | undefined> => {
+    const controller = beginOperationProgress(initial)
+
+    try {
+      await waitForPaint()
+      const result = await task(controller)
+      ensureOperationActive(controller)
+      return result
+    } catch (error) {
+      if (isCancelledError(error)) {
+        setStatusMessage(cancelledMessage)
+        return undefined
+      }
+
+      const message = error instanceof Error ? error.message : '操作失败，请重试。'
+      setErrorMessage(message)
+      return undefined
+    } finally {
+      endOperationProgress(controller)
+    }
+  }
+
+  const importPayloads = async (payloads: ImportedFilePayload[], controller: OperationController): Promise<void> => {
+    ensureOperationActive(controller)
+
+    if (payloads.length === 0) {
+      setStatusMessage('没有找到可导入的图片或 GIF。')
+      return
+    }
+
+    const session = await buildImportSession(payloads, async (progress) => {
+      await updateOperationProgress(controller, progress)
+    })
+
+    ensureOperationActive(controller)
+    applyImportSession(session)
+    setPingPongDirection(1)
+  }
+
+  const exportFramesToDirectory = async (
+    directory: string,
+    framesToWrite: FrameItem[],
+    stage: 'export-sequence' | 'export-split-sequence',
+    controller: OperationController
+  ): Promise<void> => {
+    for (let index = 0; index < framesToWrite.length; index += 1) {
+      ensureOperationActive(controller)
+      const frame = framesToWrite[index]
+      const bytes = await frameToBytes(frame, exportSettings.imageFormat)
+      ensureOperationActive(controller)
+
+      const fileName = buildExportFileName(exportSettings.fileNamePrefix, index, exportSettings.padding, exportSettings.imageFormat)
+      await window.desktopApi.writeBinaryFile({
+        data: Array.from(bytes),
+        filePath: joinPath(directory, fileName)
+      })
+
+      await updateOperationProgress(controller, {
+        current: index + 1,
+        percent: ((index + 1) / framesToWrite.length) * 100,
+        stage,
+        total: framesToWrite.length
+      })
+    }
+  }
+
+  const importPaths = async (paths: string[]): Promise<void> => {
+    const uniquePaths = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)))
+    if (uniquePaths.length === 0) {
+      return
+    }
+
+    await withOperation(
+      {
+        cancellable: true,
+        detail: '正在读取本地文件...',
+        percent: null,
+        title: '正在导入资源'
+      },
+      async (controller) => {
+        const payloads = await window.desktopApi.loadPaths(uniquePaths)
+        ensureOperationActive(controller)
+        await importPayloads(payloads, controller)
+      },
+      '已取消导入。'
+    )
+  }
+
+  const importDroppedFiles = async (files: File[]): Promise<void> => {
+    const supportedFiles = files.filter((file) => isSupportedDroppedFile(file.name))
+    if (supportedFiles.length === 0) {
+      setStatusMessage('拖入内容里没有支持的图片或 GIF。')
+      return
+    }
+
+    const resolvedPaths = supportedFiles
+      .map((file) => window.desktopApi.getPathForDroppedFile(file))
+      .filter((value): value is string => Boolean(value))
+
+    if (resolvedPaths.length === supportedFiles.length && resolvedPaths.length > 0) {
+      await importPaths(resolvedPaths)
+      return
+    }
+
+    await withOperation(
+      {
+        cancellable: true,
+        detail: '正在读取拖入文件...',
+        percent: null,
+        title: '正在导入资源'
+      },
+      async (controller) => {
+        const payloads: ImportedFilePayload[] = []
+
+        for (let index = 0; index < supportedFiles.length; index += 1) {
+          const file = supportedFiles[index]
+          ensureOperationActive(controller)
+
+          await updateOperationProgress(controller, {
+            cancellable: true,
+            detail: `正在读取拖入文件 (${index + 1}/${supportedFiles.length})`,
+            percent: ((index + 1) / supportedFiles.length) * 20,
+            title: '正在导入资源'
+          })
+
+          const extension = file.name.split('.').pop()?.toLowerCase() ?? 'png'
+          payloads.push({
+            dataUrl: await readFileAsDataUrl(file),
+            extension,
+            mimeType: file.type || `image/${extension}`,
+            name: file.name,
+            path: '',
+            size: file.size
+          })
+        }
+
+        await importPayloads(payloads, controller)
+      },
+      '已取消导入。'
+    )
+  }
+
+  const handleImportFiles = async (): Promise<void> => {
+    const paths = await window.desktopApi.openFiles()
+    if (!paths || paths.length === 0) {
+      return
+    }
+
+    await importPaths(paths)
+  }
+
+  const handleImportFolder = async (): Promise<void> => {
+    const directory = await window.desktopApi.openDirectory()
+    if (!directory) {
+      return
+    }
+
+    await importPaths([directory])
+  }
+
+  const handleUpdateSheet = (patch: Partial<SheetState>, recordHistory = true): void => {
+    updateSheetSettings(
+      {
+        ...patch,
+        autoApplied: false
+      },
+      recordHistory
+    )
+  }
+
+  const handleChooseCandidate = (candidate: GridCandidate): void => {
+    handleUpdateSheet(
+      {
+        columns: candidate.columns,
+        frameHeight: candidate.frameHeight,
+        frameWidth: candidate.frameWidth,
+        mode: 'grid',
+        rows: candidate.rows
+      },
+      false
+    )
+    setStatusMessage(`已切换到候选网格 ${candidate.rows} x ${candidate.columns}。`)
+  }
+
+  const handleApplySheet = async (): Promise<void> => {
+    if (!sheet.source || !sheetGeometry.canApply) {
+      return
+    }
+
+    const source = sheet.source
+
+    await withOperation(
+      {
+        cancellable: true,
+        detail: '正在根据当前网格切出时间轴帧...',
+        percent: 0,
+        title: '正在拆分图集'
+      },
+      async (controller) => {
+        const nextFrames = await splitSheetToFrames(
+          source,
+          sheetGeometry.rows,
+          sheetGeometry.columns,
+          sheetGeometry.frameWidth,
+          sheetGeometry.frameHeight,
+          async (progress) => {
+            await updateOperationProgress(controller, progress)
+          }
+        )
+
+        ensureOperationActive(controller)
+        replaceFrames(nextFrames, {
+          keepSelection: false,
+          playbackPatch: {
+            currentFrame: 0,
+            endFrame: Math.max(0, nextFrames.length - 1),
+            isPlaying: nextFrames.length > 1,
+            startFrame: 0
+          },
+          sheet: {
+            ...sheet,
+            autoApplied: false,
+            columns: sheetGeometry.columns,
+            enabled: true,
+            frameHeight: sheetGeometry.frameHeight,
+            frameWidth: sheetGeometry.frameWidth,
+            rows: sheetGeometry.rows
+          }
+        })
+        setPingPongDirection(1)
+        setStatusMessage(`已按 ${sheetGeometry.rows} x ${sheetGeometry.columns} 拆分为 ${nextFrames.length} 帧。`)
+      },
+      '已取消拆分。'
+    )
+  }
+
+  const handleRotate = async (rotation: 90 | 180 | 270): Promise<void> => {
+    if (frames.length === 0) {
+      return
+    }
+
+    await withOperation(
+      {
+        cancellable: true,
+        detail: `正在准备将全部帧旋转 ${rotation}°...`,
+        percent: 0,
+        title: '正在旋转序列'
+      },
+      async (controller) => {
+        const rotatedFrames = await rotateFrames(frames, rotation, async (progress) => {
+          await updateOperationProgress(controller, progress)
+        })
+
+        ensureOperationActive(controller)
+        replaceFrames(rotatedFrames, {
+          keepSelection: true
+        })
+        setStatusMessage(`已将全部帧旋转 ${rotation}°。`)
+      },
+      '已取消旋转。'
+    )
+  }
+
+  const stepSequence = (direction: 1 | -1): void => {
+    if (playbackSequence.length === 0) {
+      return
+    }
+
+    const currentPosition = playbackSequence.indexOf(playback.currentFrame)
+    const basePosition =
+      currentPosition === -1 ? (direction === 1 ? 0 : Math.max(0, playbackSequence.length - 1)) : currentPosition
+    const nextPosition = (basePosition + direction + playbackSequence.length) % playbackSequence.length
+
+    setCurrentFrame(playbackSequence[nextPosition] ?? 0)
+    if (playback.loopMode === 'pingpong') {
+      setPingPongDirection(direction)
+    }
+  }
+
+  const handlePrevious = (): void => {
+    stepSequence(-1)
+  }
+
+  const handleNext = (): void => {
+    stepSequence(1)
+  }
+
+  const handleTogglePlay = (): void => {
+    if (frames.length === 0) {
+      return
+    }
+
+    if (!playback.isPlaying && playbackSequence.length > 0 && !playbackSequence.includes(playback.currentFrame)) {
+      setCurrentFrame(playbackSequence[0] ?? 0)
+    }
+
+    setIsPlaying(!playback.isPlaying)
+  }
+
+  const handleExportSequence = async (): Promise<void> => {
+    if (exportFrames.length === 0) {
+      return
+    }
+
+    const directory = await window.desktopApi.chooseDirectory('选择图片序列导出文件夹')
+    if (!directory) {
+      return
+    }
+
+    await withOperation(
+      {
+        cancellable: true,
+        detail: '正在写入图片序列...',
+        percent: 0,
+        title: '正在导出图片'
+      },
+      async (controller) => {
+        await exportFramesToDirectory(directory, exportFrames, 'export-sequence', controller)
+        setStatusMessage(`已导出 ${exportFrames.length} 张图片到 ${directory}`)
+      },
+      '已取消导出图片序列。'
+    )
+  }
+
+  const handleExportSplitSequence = async (): Promise<void> => {
+    if (!sheet.source || !sheetGeometry.canApply) {
+      return
+    }
+
+    const source = sheet.source
+
+    const directory = await window.desktopApi.chooseDirectory('选择拆分结果导出文件夹')
+    if (!directory) {
+      return
+    }
+
+    await withOperation(
+      {
+        cancellable: true,
+        detail: '正在根据当前拆分设置生成帧...',
+        percent: 0,
+        title: '正在导出拆分结果'
+      },
+      async (controller) => {
+        const splitFrames = await splitSheetToFrames(
+          source,
+          sheetGeometry.rows,
+          sheetGeometry.columns,
+          sheetGeometry.frameWidth,
+          sheetGeometry.frameHeight,
+          async (progress) => {
+            await updateOperationProgress(controller, progress)
+          }
+        )
+
+        ensureOperationActive(controller)
+        await exportFramesToDirectory(directory, splitFrames, 'export-split-sequence', controller)
+        setStatusMessage(`已导出 ${splitFrames.length} 张拆分图片到 ${directory}`)
+      },
+      '已取消拆分导出。'
+    )
+  }
+
+  const handleExportSheet = async (): Promise<void> => {
+    if (exportFrames.length === 0) {
+      return
+    }
+
+    const layout = normalizeSheetLayout(
+      exportFrames.length,
+      exportSettings.spriteSheetRows,
+      exportSettings.spriteSheetColumns
+    )
+
+    await withOperation(
+      {
+        cancellable: true,
+        detail: `正在按 ${layout.rows} x ${layout.columns} 合并帧...`,
+        percent: 15,
+        title: '正在导出序列图'
+      },
+      async (controller) => {
+        const { canvas } = await composeSpriteSheet(exportFrames, layout.rows, layout.columns)
+        ensureOperationActive(controller)
+
+        await updateOperationProgress(controller, {
+          cancellable: true,
+          detail: '正在编码图像...',
+          percent: 72,
+          title: '正在导出序列图'
+        })
+
+        const bytes = await canvasToBytes(canvas, exportSettings.imageFormat)
+        ensureOperationActive(controller)
+
+        await updateOperationProgress(controller, {
+          cancellable: true,
+          detail: '正在写入输出文件...',
+          percent: 92,
+          title: '正在导出序列图'
+        })
+
+        const savedPath = await window.desktopApi.saveBinaryFile({
+          data: Array.from(bytes),
+          defaultPath: `${exportSettings.fileNamePrefix}_sheet.${exportSettings.imageFormat}`,
+          filters: saveFiltersByFormat[exportSettings.imageFormat],
+          title: '导出序列图'
+        })
+
+        if (!savedPath) {
+          setStatusMessage('已取消导出序列图。')
+          return
+        }
+
+        setStatusMessage(`已导出序列图：${savedPath}`)
+      },
+      '已取消导出序列图。'
+    )
+  }
+
+  const handleExportGif = async (): Promise<void> => {
+    if (exportFrames.length === 0) {
+      return
+    }
+
+    await withOperation(
+      {
+        cancellable: true,
+        detail: '正在准备 GIF 编码...',
+        percent: 0,
+        title: '正在导出 GIF'
+      },
+      async (controller) => {
+        const bytes = await encodeGif(exportFrames, playback.fps, async (progress) => {
+          await updateOperationProgress(controller, progress)
+        })
+
+        ensureOperationActive(controller)
+        await updateOperationProgress(controller, {
+          cancellable: true,
+          detail: '正在写入 GIF 文件...',
+          percent: 96,
+          title: '正在导出 GIF'
+        })
+
+        const savedPath = await window.desktopApi.saveBinaryFile({
+          data: Array.from(bytes),
+          defaultPath: `${exportSettings.fileNamePrefix}.gif`,
+          filters: saveFiltersByFormat.gif,
+          title: '导出 GIF'
+        })
+
+        if (!savedPath) {
+          setStatusMessage('已取消导出 GIF。')
+          return
+        }
+
+        setStatusMessage(`已导出 GIF：${savedPath}`)
+      },
+      '已取消导出 GIF。'
+    )
+  }
+
+  const handleClearWorkspace = (): void => {
+    windowDragDepthRef.current = 0
+    setIsWindowDragActive(false)
+    setPingPongDirection(1)
+    resetWorkspace()
+  }
 
   const advancePlayback = useEffectEvent(() => {
     if (playbackSequence.length === 0) {
@@ -262,10 +744,15 @@ export default function App() {
     }
 
     const currentPosition = Math.max(0, playbackSequence.indexOf(playback.currentFrame))
-    const result = advanceSequencePosition(playbackSequence.length, currentPosition, pingPongDirection, playback.loopMode)
+    const result = advanceSequencePosition(
+      playbackSequence.length,
+      currentPosition,
+      pingPongDirection,
+      playback.loopMode
+    )
 
     setPingPongDirection(result.direction)
-    setCurrentFrame(playbackSequence[result.position] ?? playbackSequence[0])
+    setCurrentFrame(playbackSequence[result.position] ?? playbackSequence[0] ?? 0)
 
     if (result.shouldStop) {
       setIsPlaying(false)
@@ -277,17 +764,29 @@ export default function App() {
       return undefined
     }
 
-    const interval = window.setInterval(advancePlayback, Math.max(16, Math.round(1000 / Math.max(1, playback.fps))))
-    return () => window.clearInterval(interval)
+    const intervalMs = Math.max(16, Math.round(1000 / Math.max(1, playback.fps)))
+    const timer = window.setInterval(() => {
+      startTransition(() => {
+        advancePlayback()
+      })
+    }, intervalMs)
+
+    return () => {
+      window.clearInterval(timer)
+    }
   }, [advancePlayback, playback.fps, playback.isPlaying, playbackSequence.length])
 
-  const handleWindowDropFiles = useEffectEvent((files: File[]) => {
+  useEffect(() => {
+    setPingPongDirection(1)
+  }, [playback.reverse, playbackSequence.length])
+
+  const handleWindowDrop = useEffectEvent((files: File[]) => {
     void importDroppedFiles(files)
   })
 
   useEffect(() => {
     const onDragEnter = (event: DragEvent) => {
-      if (!hasFileDrag(event.dataTransfer)) {
+      if (isBusy || !hasFileDrag(event.dataTransfer)) {
         return
       }
 
@@ -297,11 +796,14 @@ export default function App() {
     }
 
     const onDragOver = (event: DragEvent) => {
-      if (!hasFileDrag(event.dataTransfer)) {
+      if (isBusy || !hasFileDrag(event.dataTransfer)) {
         return
       }
 
       event.preventDefault()
+      if (!isWindowDragActive) {
+        setIsWindowDragActive(true)
+      }
     }
 
     const onDragLeave = (event: DragEvent) => {
@@ -317,16 +819,17 @@ export default function App() {
     }
 
     const onDrop = (event: DragEvent) => {
-      if (!hasFileDrag(event.dataTransfer)) {
+      if (isBusy || !hasFileDrag(event.dataTransfer)) {
         return
       }
 
       event.preventDefault()
       windowDragDepthRef.current = 0
       setIsWindowDragActive(false)
+
       const droppedFiles = Array.from(event.dataTransfer?.files ?? [])
       if (droppedFiles.length > 0) {
-        handleWindowDropFiles(droppedFiles)
+        handleWindowDrop(droppedFiles)
       }
     }
 
@@ -341,392 +844,28 @@ export default function App() {
       window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('drop', onDrop)
     }
-  }, [handleWindowDropFiles])
-
-  const importPayloads = async (payloads: ImportedFilePayload[]) => {
-    if (payloads.length === 0) {
-      setErrorMessage('未发现可导入的 PNG、JPG、WEBP 或 GIF 文件。')
-      return
-    }
-
-    try {
-      clearError()
-      const session = await buildImportSession(payloads, async (progress) => {
-        await updateOperationProgress(progress)
-      })
-
-      startTransition(() => {
-        applyImportSession(session)
-      })
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '导入失败。')
-    } finally {
-      endOperationProgress()
-    }
-  }
-
-  const importPaths = async (paths: string[]) => {
-    if (paths.length === 0) {
-      return
-    }
-
-    try {
-      clearError()
-      await beginOperationProgress('正在读取资源', '正在扫描选择的文件或文件夹...', null)
-      const payloads = await window.desktopApi.loadPaths(paths)
-      await updateOperationProgress({
-        detail: '资源已读取，正在生成帧数据...',
-        percent: 8,
-        title: '正在导入资源'
-      })
-      await importPayloads(payloads)
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '导入失败。')
-      endOperationProgress()
-    }
-  }
-
-  const importDroppedFiles = async (files: File[]) => {
-    if (files.length === 0) {
-      return
-    }
-
-    const uniquePaths = new Set<string>()
-    const fallbackFiles: File[] = []
-
-    files.forEach((file) => {
-      try {
-        const resolvedPath = window.desktopApi.getPathForDroppedFile(file)
-        if (resolvedPath) {
-          uniquePaths.add(resolvedPath)
-          return
-        }
-      } catch {
-        // Fall through to blob-based import.
-      }
-
-      if (isSupportedDroppedFile(file.name)) {
-        fallbackFiles.push(file)
-      }
-    })
-
-    try {
-      clearError()
-      await beginOperationProgress('正在读取拖入内容', '正在解析拖入文件...', null)
-
-      const [pathPayloads, fallbackPayloads] = await Promise.all([
-        uniquePaths.size > 0 ? window.desktopApi.loadPaths([...uniquePaths]) : Promise.resolve<ImportedFilePayload[]>([]),
-        Promise.all(
-          fallbackFiles.map(async (file, index) => {
-            const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
-            const dataUrl = await readFileAsDataUrl(file)
-
-            await updateOperationProgress({
-              detail: `正在读取拖入文件 (${index + 1}/${fallbackFiles.length})`,
-              percent: fallbackFiles.length > 0 ? ((index + 1) / fallbackFiles.length) * 8 : 8,
-              title: '正在读取拖入内容'
-            })
-
-            return {
-              dataUrl,
-              extension,
-              mimeType: file.type || 'application/octet-stream',
-              name: file.name,
-              path: file.name,
-              size: file.size
-            }
-          })
-        )
-      ])
-
-      await updateOperationProgress({
-        detail: '拖入内容已读取，正在生成帧数据...',
-        percent: 8,
-        title: '正在导入资源'
-      })
-      await importPayloads([...pathPayloads, ...fallbackPayloads])
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '拖拽导入失败。')
-      endOperationProgress()
-    }
-  }
-
-  const handleImportFiles = async () => {
-    const paths = await window.desktopApi.openFiles()
-    if (paths) {
-      await importPaths(paths)
-    }
-  }
-
-  const handleImportFolder = async () => {
-    const directory = await window.desktopApi.openDirectory()
-    if (directory) {
-      await importPaths([directory])
-    }
-  }
-
-  const handleApplySheet = async () => {
-    if (!sheet.source || !sheetGeometry.canApply) {
-      setErrorMessage('当前拆分设置无法整除源图。')
-      return
-    }
-
-    try {
-      await beginOperationProgress('正在拆分图集', '正在切出图集帧...', 0)
-      const splitFrames = await splitSheetToFrames(
-        sheet.source,
-        sheetGeometry.rows,
-        sheetGeometry.columns,
-        sheetGeometry.frameWidth,
-        sheetGeometry.frameHeight,
-        async (progress) => {
-          await updateOperationProgress(progress)
-        }
-      )
-
-      replaceFrames(splitFrames, {
-        playbackPatch: {
-          currentFrame: 0,
-          endFrame: Math.max(0, splitFrames.length - 1),
-          startFrame: 0
-        },
-        sheet: {
-          ...sheet,
-          autoApplied: true,
-          columns: sheetGeometry.columns,
-          frameHeight: sheetGeometry.frameHeight,
-          frameWidth: sheetGeometry.frameWidth,
-          rows: sheetGeometry.rows
-        }
-      })
-      setStatusMessage(`已按 ${sheetGeometry.rows} x ${sheetGeometry.columns} 应用拆分。`)
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '图集拆分失败。')
-    } finally {
-      endOperationProgress()
-    }
-  }
-
-  const handleRotate = async (rotation: 90 | 180 | 270) => {
-    if (frames.length === 0) {
-      return
-    }
-
-    try {
-      await beginOperationProgress('正在旋转序列', `准备旋转 ${frames.length} 帧...`, 0)
-      const rotatedFrames = await rotateFrames(frames, rotation, async (progress) => {
-        await updateOperationProgress(progress)
-      })
-      replaceFrames(rotatedFrames, { keepSelection: true })
-      setStatusMessage(`已将 ${rotatedFrames.length} 帧旋转 ${rotation}°。`)
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '旋转失败。')
-    } finally {
-      endOperationProgress()
-    }
-  }
-
-  const handlePrevious = () => {
-    if (playbackSequence.length === 0) {
-      return
-    }
-
-    const currentPosition = Math.max(0, playbackSequence.indexOf(playback.currentFrame))
-    setCurrentFrame(playbackSequence[Math.max(0, currentPosition - 1)] ?? playbackSequence[0])
-  }
-
-  const handleNext = () => {
-    if (playbackSequence.length === 0) {
-      return
-    }
-
-    const currentPosition = Math.max(0, playbackSequence.indexOf(playback.currentFrame))
-    setCurrentFrame(
-      playbackSequence[Math.min(playbackSequence.length - 1, currentPosition + 1)] ?? playbackSequence[playbackSequence.length - 1]
-    )
-  }
-
-  const handleExportSequence = async () => {
-    if (exportFrames.length === 0) {
-      return
-    }
-
-    try {
-      await beginOperationProgress('正在导出图片', '正在选择导出目录...', null)
-      const directory = await window.desktopApi.chooseDirectory('选择图片序列导出文件夹')
-      if (!directory) {
-        return
-      }
-
-      for (let index = 0; index < exportFrames.length; index += 1) {
-        const frame = exportFrames[index]
-        await updateOperationProgress({
-          current: index + 1,
-          percent: ((index + 1) / exportFrames.length) * 100,
-          stage: 'export-sequence',
-          total: exportFrames.length
-        })
-        const bytes = await frameToBytes(frame, exportSettings.imageFormat)
-        const fileName = buildExportFileName(exportSettings.fileNamePrefix, index, exportSettings.padding, exportSettings.imageFormat)
-
-        await window.desktopApi.writeBinaryFile({
-          data: Array.from(bytes),
-          filePath: joinPath(directory, fileName)
-        })
-      }
-
-      setStatusMessage(`已导出 ${exportFrames.length} 张图片到 ${directory}。`)
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '图片序列导出失败。')
-    } finally {
-      endOperationProgress()
-    }
-  }
-
-  const handleExportSplitSequence = async () => {
-    if (!sheet.source || !sheetGeometry.canApply || sheetGeometry.predictedFrameCount === 0) {
-      setErrorMessage('只有当前拆分设置能整除源图时，才能直接导出拆分序列。')
-      return
-    }
-
-    try {
-      await beginOperationProgress('正在导出拆分结果', '正在选择导出目录...', null)
-      const directory = await window.desktopApi.chooseDirectory('选择拆分序列导出文件夹')
-      if (!directory) {
-        return
-      }
-
-      const splitFrames = await splitSheetToFrames(
-        sheet.source,
-        sheetGeometry.rows,
-        sheetGeometry.columns,
-        sheetGeometry.frameWidth,
-        sheetGeometry.frameHeight,
-        async (progress) => {
-          await updateOperationProgress({
-            detail: `正在切出拆分帧 (${progress.current}/${progress.total})`,
-            percent: ((progress.percent ?? 0) * 0.45),
-            title: '正在导出拆分结果'
-          })
-        }
-      )
-      const exportIndices = buildSampledIndices(splitFrames.length, exportSettings.exportSkip)
-
-      for (let exportPosition = 0; exportPosition < exportIndices.length; exportPosition += 1) {
-        await updateOperationProgress({
-          current: exportPosition + 1,
-          percent: 45 + (((exportPosition + 1) / exportIndices.length) * 55),
-          stage: 'export-split-sequence',
-          total: exportIndices.length
-        })
-        const frame = splitFrames[exportIndices[exportPosition]]
-        const bytes = await frameToBytes(frame, exportSettings.imageFormat)
-        const fileName = buildExportFileName(
-          exportSettings.fileNamePrefix,
-          exportPosition,
-          exportSettings.padding,
-          exportSettings.imageFormat
-        )
-
-        await window.desktopApi.writeBinaryFile({
-          data: Array.from(bytes),
-          filePath: joinPath(directory, fileName)
-        })
-      }
-
-      setStatusMessage(
-        `已按 ${sheetGeometry.rows} x ${sheetGeometry.columns} 直接导出 ${exportIndices.length} 张拆分图片，且未替换当前时间轴。`
-      )
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '拆分序列导出失败。')
-    } finally {
-      endOperationProgress()
-    }
-  }
-
-  const handleExportSheet = async () => {
-    if (exportFrames.length === 0) {
-      return
-    }
-
-    try {
-      await beginOperationProgress('正在导出图集', '正在合成图集...', 35)
-      const layout = normalizeSheetLayout(exportFrames.length, exportSettings.spriteSheetRows, exportSettings.spriteSheetColumns)
-      const { canvas } = await composeSpriteSheet(exportFrames, layout.rows, layout.columns)
-      await updateOperationProgress({
-        detail: '正在编码图集文件...',
-        percent: 80,
-        title: '正在导出图集'
-      })
-      const bytes = await canvasToBytes(canvas, exportSettings.imageFormat)
-      const savedPath = await window.desktopApi.saveBinaryFile({
-        data: Array.from(bytes),
-        defaultPath: `sprite-sheet.${exportSettings.imageFormat}`,
-        filters: saveFiltersByFormat[exportSettings.imageFormat],
-        title: '保存图集'
-      })
-
-      if (savedPath) {
-        setStatusMessage(`图集已保存到 ${savedPath}。`)
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '图集导出失败。')
-    } finally {
-      endOperationProgress()
-    }
-  }
-
-  const handleExportGif = async () => {
-    if (exportFrames.length === 0) {
-      return
-    }
-
-    try {
-      await beginOperationProgress('正在导出 GIF', '正在准备 GIF 编码...', 0)
-      const bytes = await encodeGif(exportFrames, playback.fps, async (progress) => {
-        await updateOperationProgress(progress)
-      })
-      const savedPath = await window.desktopApi.saveBinaryFile({
-        data: Array.from(bytes),
-        defaultPath: 'animation.gif',
-        filters: saveFiltersByFormat.gif,
-        title: '保存 GIF'
-      })
-
-      if (savedPath) {
-        setStatusMessage(`GIF 已保存到 ${savedPath}。`)
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'GIF 导出失败。')
-    } finally {
-      endOperationProgress()
-    }
-  }
-
-  smokeFnsRef.current = {
-    exportSequence: handleExportSequence,
-    importPaths
-  }
+  }, [handleWindowDrop, isBusy, isWindowDragActive])
 
   useEffect(() => {
-    if (!navigator.webdriver) {
-      return undefined
+    smokeFnsRef.current = {
+      exportSequence: handleExportSequence,
+      importPaths
     }
+  })
 
-    const smokeWindow = window as Window & {
-      __spriteSheetSmoke?: {
-        exportSequence: () => Promise<void>
-        importPaths: (paths: string[]) => Promise<void>
+  useEffect(() => {
+    const bridge: SmokeBridge = {
+      exportSequence: async () => {
+        await smokeFnsRef.current?.exportSequence()
+      },
+      importPaths: async (paths) => {
+        await smokeFnsRef.current?.importPaths(paths)
       }
     }
 
-    smokeWindow.__spriteSheetSmoke = {
-      exportSequence: () => smokeFnsRef.current?.exportSequence() ?? Promise.resolve(),
-      importPaths: (paths) => smokeFnsRef.current?.importPaths(paths) ?? Promise.resolve()
-    }
-
+    window.__spriteSheetSmoke = bridge
     return () => {
-      delete smokeWindow.__spriteSheetSmoke
+      delete window.__spriteSheetSmoke
     }
   }, [])
 
@@ -737,7 +876,7 @@ export default function App() {
           <span className="eyebrow-header">桌面工具链</span>
           <h1>序列图工具</h1>
         </div>
-        <p>面向游戏特效师的桌面序列图工具，专注快速导入、清晰预览、可靠拆分与稳定导出。</p>
+        <p>面向游戏特效师的高密度桌面工作台，支持快速导入、自动识别、预览拆分与稳定导出。</p>
       </header>
 
       {errorMessage ? (
@@ -749,24 +888,35 @@ export default function App() {
         </div>
       ) : null}
 
-      <main className="app-grid">
-        <div className="sidebar-column">
+      <div className="app-grid">
+        <aside className="sidebar-column">
           <ImportPanel
+            canClear={canClear}
             canRedo={canRedo}
             canUndo={canUndo}
             frameCount={frames.length}
             isBusy={isBusy}
+            onClearWorkspace={handleClearWorkspace}
             onDeleteSelected={deleteSelectedFrames}
-            onDropFiles={importDroppedFiles}
-            onImportFiles={handleImportFiles}
-            onImportFolder={handleImportFolder}
+            onDropFiles={(files) => {
+              void importDroppedFiles(files)
+            }}
+            onImportFiles={() => {
+              void handleImportFiles()
+            }}
+            onImportFolder={() => {
+              void handleImportFolder()
+            }}
             onRedo={redo}
             onReverse={reverseFrames}
-            onRotate={handleRotate}
+            onRotate={(rotation) => {
+              void handleRotate(rotation)
+            }}
             onUndo={undo}
             selectedCount={selectedFrameIds.length}
             statusMessage={statusMessage}
           />
+
           <SheetPanel
             canApply={sheetGeometry.canApply}
             columns={sheetGeometry.columns}
@@ -774,28 +924,21 @@ export default function App() {
             frameHeight={sheetGeometry.frameHeight}
             frameWidth={sheetGeometry.frameWidth}
             isBusy={isBusy}
-            onApply={handleApplySheet}
-            onChooseCandidate={(candidate) =>
-              updateSheetSettings(
-                {
-                  columns: candidate.columns,
-                  frameHeight: candidate.frameHeight,
-                  frameWidth: candidate.frameWidth,
-                  mode: 'grid',
-                  rows: candidate.rows
-                },
-                false
-              )
-            }
-            onExportSplitSequence={handleExportSplitSequence}
-            onUpdateSheet={updateSheetSettings}
+            onApply={() => {
+              void handleApplySheet()
+            }}
+            onChooseCandidate={handleChooseCandidate}
+            onExportSplitSequence={() => {
+              void handleExportSplitSequence()
+            }}
+            onUpdateSheet={handleUpdateSheet}
             predictedFrameCount={sheetGeometry.predictedFrameCount}
             rows={sheetGeometry.rows}
             sheet={sheet}
           />
-        </div>
+        </aside>
 
-        <div className="preview-column">
+        <main className="preview-column">
           <PreviewStage background={playback.background} frame={currentFrame} zoom={playback.zoom} />
           <FrameTimeline
             currentFrame={playback.currentFrame}
@@ -804,56 +947,73 @@ export default function App() {
             onSelectFrame={selectFrame}
             selectedFrameIds={selectedFrameIds}
           />
-        </div>
+        </main>
 
-        <div className="sidebar-column">
+        <aside className="sidebar-column">
           <PlaybackPanel
             frameCount={frames.length}
             onNext={handleNext}
             onPrevious={handlePrevious}
-            onTogglePlay={() => setIsPlaying(!playback.isPlaying)}
+            onTogglePlay={handleTogglePlay}
             onUpdatePlayback={updatePlaybackSettings}
             playback={playback}
             sequenceCount={playbackSequence.length}
           />
+
           <ExportPanel
             exportFrameCount={exportFrames.length}
             exportSettings={exportSettings}
-            onExportGif={handleExportGif}
-            onExportSequence={handleExportSequence}
-            onExportSheet={handleExportSheet}
+            onExportGif={() => {
+              void handleExportGif()
+            }}
+            onExportSequence={() => {
+              void handleExportSequence()
+            }}
+            onExportSheet={() => {
+              void handleExportSheet()
+            }}
             onUpdateExport={updateExportSettings}
             recommendedLayout={recommendedLayout}
           />
-        </div>
-      </main>
+        </aside>
+      </div>
 
-      {isBusy ? (
+      {isBusy && operationProgress ? (
         <div className="busy-overlay">
           <div className="busy-card">
-            <strong>{operationProgress?.title ?? '正在处理图像'}</strong>
-            <span>{operationProgress?.detail ?? '请稍候，任务仍在继续。'}</span>
+            <strong>{operationProgress.title}</strong>
+            <span>{operationProgress.detail}</span>
             <div className="busy-progress-track">
               <div
-                className={
-                  operationProgress?.percent == null
-                    ? 'busy-progress-bar indeterminate'
-                    : 'busy-progress-bar'
+                className={operationProgress.percent === null ? 'busy-progress-bar indeterminate' : 'busy-progress-bar'}
+                style={
+                  operationProgress.percent === null
+                    ? undefined
+                    : { width: `${Math.max(0, Math.min(100, operationProgress.percent))}%` }
                 }
-                style={operationProgress?.percent == null ? undefined : { width: `${Math.max(4, Math.min(100, operationProgress.percent))}%` }}
               />
             </div>
             <small>
-              {operationProgress?.percent == null ? '处理中...' : `${Math.round(operationProgress.percent)}%`}
+              {operationProgress.percent === null
+                ? '当前步骤无法精确估时，但任务仍在继续。'
+                : `已完成 ${Math.round(operationProgress.percent)}%`}
             </small>
+            {operationProgress.cancellable ? (
+              <div className="busy-card-actions">
+                <button className="secondary-button" onClick={cancelCurrentOperation} type="button">
+                  取消当前任务
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
+
       {isWindowDragActive ? (
         <div className="drop-overlay">
           <div className="drop-overlay-card">
-            <strong>松手即可导入</strong>
-            <span>支持将图片、GIF 或整个文件夹拖进窗口任意位置。</span>
+            <strong>松开即可导入</strong>
+            <span>支持图片、GIF 和文件夹。规则序列图会尽量自动识别，并在置信度足够时直接开始播放。</span>
           </div>
         </div>
       ) : null}

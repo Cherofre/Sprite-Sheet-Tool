@@ -64,8 +64,8 @@ export function PreviewStage({ background, frame, zoom }: PreviewStageProps) {
           />
         ) : (
           <div className="preview-empty">
-            <strong>还没有选中帧</strong>
-            <p>导入序列或图集后，就可以在这里预览动画。</p>
+            <strong>还没有可预览的帧</strong>
+            <p>导入序列或图集后，就可以在这里查看动画预览。</p>
           </div>
         )}
       </div>

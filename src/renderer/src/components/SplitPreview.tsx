@@ -32,10 +32,7 @@ export function SplitPreview({
   source
 }: SplitPreviewProps) {
   const [sampleThumbs, setSampleThumbs] = useState<PreviewThumb[]>([])
-  const sampleIndices = useMemo(
-    () => buildSplitPreviewSampleIndices(predictedFrameCount, 6),
-    [predictedFrameCount]
-  )
+  const sampleIndices = useMemo(() => buildSplitPreviewSampleIndices(predictedFrameCount, 6), [predictedFrameCount])
 
   useEffect(() => {
     let isCancelled = false

@@ -27,7 +27,9 @@ interface EditorState extends EditorSnapshot {
   clearSelection: () => void
   deleteSelectedFrames: () => void
   moveFrame: (activeId: string, overId: string) => void
+  redo: () => void
   replaceFrames: (frames: FrameItem[], options?: ReplaceFramesOptions) => void
+  resetWorkspace: () => void
   reverseFrames: () => void
   selectFrame: (frameId: string, toggle?: boolean, range?: boolean) => void
   setBusy: (value: boolean) => void
@@ -36,7 +38,6 @@ interface EditorState extends EditorSnapshot {
   setIsPlaying: (value: boolean) => void
   setStatusMessage: (message: string) => void
   undo: () => void
-  redo: () => void
   updateExportSettings: (patch: Partial<ExportSettings>, recordHistory?: boolean) => void
   updatePlaybackSettings: (patch: Partial<PlaybackSettings>, recordHistory?: boolean) => void
   updateSheetSettings: (patch: Partial<SheetState>, recordHistory?: boolean) => void
@@ -196,6 +197,22 @@ export const useEditorStore = create<EditorState>((set) => ({
       }
     }),
 
+  redo: () =>
+    set((state) => {
+      const next = state.historyFuture[0]
+      if (!next) {
+        return state
+      }
+
+      const currentSnapshot = structuredClone(createSnapshotFromState(state))
+      return {
+        ...snapshotToState(next),
+        historyFuture: state.historyFuture.slice(1),
+        historyPast: [...state.historyPast, currentSnapshot].slice(-HISTORY_LIMIT),
+        statusMessage: '已重做。'
+      }
+    }),
+
   replaceFrames: (frames, options) =>
     set((state) => {
       const nextSnapshot: EditorSnapshot = {
@@ -219,6 +236,14 @@ export const useEditorStore = create<EditorState>((set) => ({
         ...(options?.recordHistory === false ? {} : withHistory(state))
       }
     }),
+
+  resetWorkspace: () =>
+    set((state) => ({
+      ...snapshotToState(createEmptySnapshot()),
+      ...(state.frames.length > 0 || state.sheet.enabled ? withHistory(state) : {}),
+      errorMessage: null,
+      statusMessage: '已清空当前工作区。'
+    })),
 
   reverseFrames: () =>
     set((state) => ({
@@ -309,22 +334,6 @@ export const useEditorStore = create<EditorState>((set) => ({
         historyFuture: [currentSnapshot, ...state.historyFuture].slice(0, HISTORY_LIMIT),
         historyPast: remainingPast,
         statusMessage: '已撤销。'
-      }
-    }),
-
-  redo: () =>
-    set((state) => {
-      const next = state.historyFuture[0]
-      if (!next) {
-        return state
-      }
-
-      const currentSnapshot = structuredClone(createSnapshotFromState(state))
-      return {
-        ...snapshotToState(next),
-        historyFuture: state.historyFuture.slice(1),
-        historyPast: [...state.historyPast, currentSnapshot].slice(-HISTORY_LIMIT),
-        statusMessage: '已重做。'
       }
     }),
 

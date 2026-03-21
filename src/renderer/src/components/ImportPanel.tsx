@@ -1,8 +1,10 @@
 interface ImportPanelProps {
+  canClear: boolean
   canRedo: boolean
   canUndo: boolean
   frameCount: number
   isBusy: boolean
+  onClearWorkspace: () => void
   onDeleteSelected: () => void
   onDropFiles: (files: File[]) => void
   onImportFiles: () => void
@@ -16,10 +18,12 @@ interface ImportPanelProps {
 }
 
 export function ImportPanel({
+  canClear,
   canRedo,
   canUndo,
   frameCount,
   isBusy,
+  onClearWorkspace,
   onDeleteSelected,
   onDropFiles,
   onImportFiles,
@@ -75,7 +79,7 @@ export function ImportPanel({
           <strong>{frameCount}</strong>
         </div>
         <div className="stat-card">
-          <span>已选</span>
+          <span>已选中</span>
           <strong>{selectedCount}</strong>
         </div>
       </div>
@@ -100,6 +104,9 @@ export function ImportPanel({
         </button>
         <button className="secondary-button" disabled={frameCount === 0 || isBusy} onClick={() => onRotate(270)} type="button">
           转 270°
+        </button>
+        <button className="secondary-button" disabled={!canClear || isBusy} onClick={onClearWorkspace} type="button">
+          清空
         </button>
       </div>
 

@@ -8,6 +8,7 @@ interface SheetPanelProps {
   exportSettings: ExportSettings
   frameHeight: number
   frameWidth: number
+  isBusy?: boolean
   onApply: () => void
   onChooseCandidate: (candidate: GridCandidate) => void
   onExportSplitSequence: () => void
@@ -15,7 +16,6 @@ interface SheetPanelProps {
   predictedFrameCount: number
   rows: number
   sheet: SheetState
-  isBusy?: boolean
 }
 
 const parseInteger = (value: string): number => Math.max(1, Number.parseInt(value || '1', 10) || 1)
@@ -42,28 +42,28 @@ export function SheetPanel({
           <span className="eyebrow">拆分</span>
           <h2>图集识别</h2>
         </div>
-        <p className="muted-copy">导入单张图片后，可按规则图集方式预览，并手动覆盖行列或帧尺寸。</p>
+        <p className="muted-copy">导入单张图后，可以按规则图集方式预览，并手动覆盖行列或帧尺寸。</p>
       </section>
     )
   }
 
-  const syncGridValues = (rows: number, columns: number) => {
+  const syncGridValues = (nextRows: number, nextColumns: number) => {
     onUpdateSheet({
-      columns,
-      frameHeight: Math.floor(sheet.sourceHeight / rows),
-      frameWidth: Math.floor(sheet.sourceWidth / columns),
+      columns: nextColumns,
+      frameHeight: Math.floor(sheet.sourceHeight / nextRows),
+      frameWidth: Math.floor(sheet.sourceWidth / nextColumns),
       mode: 'grid',
-      rows
+      rows: nextRows
     })
   }
 
-  const syncCellValues = (frameWidth: number, frameHeight: number) => {
+  const syncCellValues = (nextFrameWidth: number, nextFrameHeight: number) => {
     onUpdateSheet({
-      columns: Math.floor(sheet.sourceWidth / frameWidth),
-      frameHeight,
-      frameWidth,
+      columns: Math.floor(sheet.sourceWidth / nextFrameWidth),
+      frameHeight: nextFrameHeight,
+      frameWidth: nextFrameWidth,
       mode: 'cell',
-      rows: Math.floor(sheet.sourceHeight / frameHeight)
+      rows: Math.floor(sheet.sourceHeight / nextFrameHeight)
     })
   }
 
@@ -183,7 +183,9 @@ export function SheetPanel({
       <div className="hint-card">
         <span className="eyebrow">直接导出</span>
         <p>
-          使用右侧输出设置：{exportSettings.imageFormat.toUpperCase()}，前缀“{exportSettings.fileNamePrefix}”，补零 {exportSettings.padding} 位，跳帧 {exportSettings.exportSkip}。
+          使用右侧输出设置：{exportSettings.imageFormat.toUpperCase()}，前缀“{exportSettings.fileNamePrefix}”，补零
+          {` ${exportSettings.padding} `}
+          位，跳帧 {exportSettings.exportSkip}。
         </p>
       </div>
 
