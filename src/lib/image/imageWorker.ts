@@ -1,11 +1,18 @@
 /// <reference lib="webworker" />
 
 import type { FrameItem, ImportedFilePayload, RotationStep, TaskProgress } from '@shared/types'
+import { GIFEncoder, applyPalette, quantize } from 'gifenc'
+import { decompressFrames, parseGIF } from 'gifuct-js'
 
 import { stripExtension } from '@lib/fs/fileNames'
 import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
 
-import type { ComposeSheetWorkerResult, ImageWorkerRequest, ImageWorkerResponse } from './imageWorkerTypes'
+import type {
+  ComposeSheetWorkerResult,
+  DecodeGifWorkerResult,
+  ImageWorkerRequest,
+  ImageWorkerResponse
+} from './imageWorkerTypes'
 
 const workerScope = self as DedicatedWorkerGlobalScope
 
@@ -32,6 +39,11 @@ const blobToDataUrl = async (blob: Blob): Promise<string> => {
 const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
   const response = await fetch(dataUrl)
   return response.blob()
+}
+
+const dataUrlToArrayBuffer = async (dataUrl: string): Promise<ArrayBuffer> => {
+  const response = await fetch(dataUrl)
+  return response.arrayBuffer()
 }
 
 const loadBitmap = async (dataUrl: string): Promise<ImageBitmap> => {
@@ -208,11 +220,120 @@ const composeSheetInWorker = async (
   }
 }
 
+const decodeGifInWorker = async (id: string, payload: ImportedFilePayload): Promise<DecodeGifWorkerResult> => {
+  const gifBuffer = await dataUrlToArrayBuffer(payload.dataUrl)
+  const parsedGif = parseGIF(gifBuffer)
+  const parsedFrames = decompressFrames(parsedGif, true)
+  const canvas = createCanvas(parsedGif.lsd.width, parsedGif.lsd.height)
+  const context = canvas.getContext('2d')
+  if (!context) {
+    throw new Error('Canvas is unavailable')
+  }
+
+  const frames: FrameItem[] = []
+  let delayTotal = 0
+
+  for (let index = 0; index < parsedFrames.length; index += 1) {
+    const frame = parsedFrames[index]
+    const imageData = new ImageData(new Uint8ClampedArray(frame.patch), frame.dims.width, frame.dims.height)
+    context.putImageData(imageData, frame.dims.left, frame.dims.top)
+
+    frames.push({
+      dataUrl: await toPngDataUrl(canvas),
+      height: canvas.height,
+      id: crypto.randomUUID(),
+      name: `${stripExtension(payload.name)}_${String(index + 1).padStart(String(parsedFrames.length).length, '0')}`,
+      sourcePath: payload.path,
+      sourceType: 'gif',
+      width: canvas.width
+    })
+
+    delayTotal += frame.delay || 100
+
+    if (frame.disposalType === 2) {
+      context.clearRect(frame.dims.left, frame.dims.top, frame.dims.width, frame.dims.height)
+    }
+
+    const processed = index + 1
+    if (shouldReportProgress(processed, parsedFrames.length)) {
+      await postProgress(id, {
+        current: processed,
+        percent: (processed / parsedFrames.length) * 100,
+        stage: 'decode-gif',
+        total: parsedFrames.length
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
+  }
+
+  return {
+    averageDelayMs: parsedFrames.length > 0 ? delayTotal / parsedFrames.length : 100,
+    frames
+  }
+}
+
+const encodeGifInWorker = async (id: string, frames: FrameItem[], fps: number): Promise<Uint8Array> => {
+  if (frames.length === 0) {
+    throw new Error('There are no frames to export')
+  }
+
+  const width = Math.max(...frames.map((frame) => frame.width))
+  const height = Math.max(...frames.map((frame) => frame.height))
+  const encoder = GIFEncoder()
+  const delay = Math.max(20, Math.round(1000 / Math.max(1, fps)))
+
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index]
+    const image = await loadBitmap(frame.dataUrl)
+    const canvas = createCanvas(width, height)
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error('Canvas is unavailable')
+    }
+
+    context.clearRect(0, 0, width, height)
+    const offsetX = Math.floor((width - image.width) / 2)
+    const offsetY = Math.floor((height - image.height) / 2)
+    context.drawImage(image, offsetX, offsetY)
+    const imageData = context.getImageData(0, 0, width, height)
+    const palette = quantize(imageData.data, 256, {
+      format: 'rgba4444',
+      oneBitAlpha: true
+    })
+    const pixels = applyPalette(imageData.data, palette, 'rgba4444')
+
+    encoder.writeFrame(pixels, width, height, {
+      delay,
+      dispose: 1,
+      palette,
+      repeat: 0,
+      transparent: true,
+      transparentIndex: 0
+    })
+
+    const processed = index + 1
+    if (shouldReportProgress(processed, frames.length)) {
+      await postProgress(id, {
+        current: processed,
+        percent: (processed / frames.length) * 100,
+        stage: 'encode-gif',
+        total: frames.length
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
+  }
+
+  encoder.finish()
+  return encoder.bytes()
+}
+
 workerScope.addEventListener('message', async (event: MessageEvent<ImageWorkerRequest>) => {
   const request = event.data
 
   try {
-    let result: ComposeSheetWorkerResult | FrameItem[]
+    let result: ComposeSheetWorkerResult | DecodeGifWorkerResult | FrameItem[] | Uint8Array
 
     switch (request.kind) {
       case 'split-sheet':
@@ -231,8 +352,26 @@ workerScope.addEventListener('message', async (event: MessageEvent<ImageWorkerRe
       case 'compose-sheet':
         result = await composeSheetInWorker(request.id, request.frames, request.rows, request.columns)
         break
+      case 'decode-gif':
+        result = await decodeGifInWorker(request.id, request.payload)
+        break
+      case 'encode-gif':
+        result = await encodeGifInWorker(request.id, request.frames, request.fps)
+        break
       default:
         throw new Error('Unknown image worker task')
+    }
+
+    if (result instanceof Uint8Array) {
+      workerScope.postMessage(
+        {
+          id: request.id,
+          result,
+          type: 'result'
+        } satisfies ImageWorkerResponse,
+        [result.buffer]
+      )
+      return
     }
 
     workerScope.postMessage({

@@ -5,6 +5,7 @@ import type { FrameItem, ImportedFilePayload, ProgressCallback } from '@shared/t
 
 import { stripExtension } from '@lib/fs/fileNames'
 import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
+import { runImageWorkerTask, supportsImageWorker } from '@lib/image/worker.client'
 
 import { loadImageElement } from './browser'
 
@@ -22,6 +23,20 @@ export const decodeGifToFrames = async (
   payload: ImportedFilePayload,
   onProgress?: ProgressCallback
 ): Promise<GifDecodeResult> => {
+  if (supportsImageWorker()) {
+    try {
+      return await runImageWorkerTask<GifDecodeResult>(
+        {
+          kind: 'decode-gif',
+          payload
+        },
+        onProgress
+      )
+    } catch {
+      // Fall back to the renderer path when worker decoding is unavailable.
+    }
+  }
+
   const gifBuffer = await dataUrlToArrayBuffer(payload.dataUrl)
   const parsedGif = parseGIF(gifBuffer)
   const parsedFrames = decompressFrames(parsedGif, true)
@@ -82,6 +97,21 @@ export const encodeGif = async (
   fps: number,
   onProgress?: ProgressCallback
 ): Promise<Uint8Array> => {
+  if (supportsImageWorker()) {
+    try {
+      return await runImageWorkerTask<Uint8Array>(
+        {
+          fps,
+          frames,
+          kind: 'encode-gif'
+        },
+        onProgress
+      )
+    } catch {
+      // Fall back to the renderer path when worker encoding is unavailable.
+    }
+  }
+
   if (frames.length === 0) {
     throw new Error('There are no frames to export')
   }

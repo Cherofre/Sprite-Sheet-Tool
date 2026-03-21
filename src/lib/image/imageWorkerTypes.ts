@@ -6,6 +6,11 @@ export interface ComposeSheetWorkerResult {
   dataUrl: string
 }
 
+export interface DecodeGifWorkerResult {
+  averageDelayMs: number
+  frames: FrameItem[]
+}
+
 export type ImageWorkerRequest =
   | {
       columns: number
@@ -29,6 +34,17 @@ export type ImageWorkerRequest =
       kind: 'compose-sheet'
       rows: number
     }
+  | {
+      id: string
+      kind: 'decode-gif'
+      payload: ImportedFilePayload
+    }
+  | {
+      fps: number
+      frames: FrameItem[]
+      id: string
+      kind: 'encode-gif'
+    }
 
 export type ImageWorkerResponse =
   | {
@@ -43,6 +59,6 @@ export type ImageWorkerResponse =
     }
   | {
       id: string
-      result: ComposeSheetWorkerResult | FrameItem[]
+      result: ComposeSheetWorkerResult | DecodeGifWorkerResult | FrameItem[] | Uint8Array
       type: 'result'
     }

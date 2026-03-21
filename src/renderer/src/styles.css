@@ -60,6 +60,16 @@ select {
   padding: 0.4rem 0.6rem;
 }
 
+input[type='number'] {
+  appearance: textfield;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 button {
   background: var(--bg-button);
   cursor: pointer;
