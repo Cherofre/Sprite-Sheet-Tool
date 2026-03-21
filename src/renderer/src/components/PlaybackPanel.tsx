@@ -2,40 +2,26 @@ import type { PlaybackSettings } from '@shared/types'
 
 interface PlaybackPanelProps {
   frameCount: number
+  onNext?: () => void
+  onPrevious?: () => void
+  onTogglePlay?: () => void
   onUpdatePlayback: (patch: Partial<PlaybackSettings>, recordHistory?: boolean) => void
   playback: PlaybackSettings
+  sequenceCount?: number
 }
 
 const parsePositiveInteger = (value: string): number => Math.max(0, Number.parseInt(value || '0', 10) || 0)
 
 export function PlaybackPanel({ frameCount, onUpdatePlayback, playback }: PlaybackPanelProps) {
+  if (frameCount === 0) {
+    return null
+  }
+
   return (
     <section className="panel stack">
       <div className="section-heading">
         <span className="eyebrow">参数</span>
-        <h2>播放设置</h2>
-      </div>
-
-      <div className="control-block">
-        <label htmlFor="fps-range">播放帧率 (FPS)</label>
-        <div className="range-row">
-          <input
-            id="fps-range"
-            max={60}
-            min={1}
-            onChange={(event) => onUpdatePlayback({ fps: Math.max(1, parsePositiveInteger(event.target.value)) })}
-            type="range"
-            value={playback.fps}
-          />
-          <input
-            className="number-input"
-            max={60}
-            min={1}
-            onChange={(event) => onUpdatePlayback({ fps: Math.max(1, parsePositiveInteger(event.target.value)) })}
-            type="number"
-            value={playback.fps}
-          />
-        </div>
+        <h2>播放参数</h2>
       </div>
 
       <div className="form-grid">
@@ -82,15 +68,13 @@ export function PlaybackPanel({ frameCount, onUpdatePlayback, playback }: Playba
         </label>
       </div>
 
-      <div className="toggle-row">
-        <button
-          className={playback.reverse ? 'toggle-button active full-width-button' : 'toggle-button full-width-button'}
-          onClick={() => onUpdatePlayback({ reverse: !playback.reverse })}
-          type="button"
-        >
-          启用倒放
-        </button>
-      </div>
+      <button
+        className={playback.reverse ? 'toggle-button active full-width-button' : 'toggle-button full-width-button'}
+        onClick={() => onUpdatePlayback({ reverse: !playback.reverse })}
+        type="button"
+      >
+        启用倒放
+      </button>
     </section>
   )
 }

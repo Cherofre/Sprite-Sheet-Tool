@@ -70,13 +70,13 @@ try {
 
   await waitFor(async () => {
     const bodyText = await window.locator('body').innerText()
-    return bodyText.includes('2 / 3') || bodyText.includes('3 / 3')
+    return bodyText.includes('2/3') || bodyText.includes('3/3')
   })
 
   await window.keyboard.press('Space')
-  await window.getByRole('button', { name: '播放' }).waitFor({ timeout: 8000 })
+  await window.locator('.play-action-btn').getByText('播放').waitFor({ timeout: 8000 })
   await window.keyboard.press('Space')
-  await window.getByRole('button', { name: '暂停' }).waitFor({ timeout: 8000 })
+  await window.locator('.play-action-btn').getByText('暂停').waitFor({ timeout: 8000 })
 
   await window.evaluate(async () => {
     await window.__spriteSheetSmoke.exportSequence()

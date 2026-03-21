@@ -5,6 +5,7 @@ import type { BackgroundMode, FrameItem } from '@shared/types'
 interface PreviewStageProps {
   background: BackgroundMode
   frame?: FrameItem
+  onZoomChange?: (zoom: number) => void
   zoom: number | 'fit'
 }
 
@@ -14,7 +15,9 @@ const backgroundClassByMode: Record<BackgroundMode, string> = {
   white: 'preview-stage stage-white'
 }
 
-export function PreviewStage({ background, frame, zoom }: PreviewStageProps) {
+const clampZoom = (value: number): number => Math.min(800, Math.max(10, value))
+
+export function PreviewStage({ background, frame, onZoomChange, zoom }: PreviewStageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [bounds, setBounds] = useState({ height: 0, width: 0 })
 
@@ -44,40 +47,43 @@ export function PreviewStage({ background, frame, zoom }: PreviewStageProps) {
         : zoom / 100
   }
 
+  const handleWheel: React.WheelEventHandler<HTMLDivElement> = (event) => {
+    if (!frame || !onZoomChange) {
+      return
+    }
+
+    event.preventDefault()
+    const baseZoom = zoom === 'fit' ? 100 : zoom
+    const nextZoom = clampZoom(baseZoom + (event.deltaY < 0 ? 10 : -10))
+    onZoomChange(nextZoom)
+  }
+
   return (
     <section className="preview-shell">
-      <div className="section-heading">
-        <span className="eyebrow">视口</span>
-        <h2>当前帧预览</h2>
-      </div>
-
-      <div className={backgroundClassByMode[background]} ref={containerRef}>
-        {frame ? (
-          <img
-            alt={frame.name}
-            className="preview-image"
-            src={frame.dataUrl}
-            style={{
-              height: frame.height * scale,
-              width: frame.width * scale
-            }}
-          />
-        ) : (
-          <div className="preview-empty">
-            <strong>还没有可预览的帧</strong>
-            <p>导入序列或图集后，就可以在这里查看动画预览。</p>
-          </div>
-        )}
-      </div>
-
-      {frame ? (
-        <div className="hint-card slim">
-          <span>{frame.name}</span>
-          <strong>
-            {frame.width} x {frame.height}
-          </strong>
+      <div className="preview-stage-frame">
+        <div
+          className={backgroundClassByMode[background]}
+          onWheel={handleWheel}
+          ref={containerRef}
+        >
+          {frame ? (
+            <img
+              alt={frame.name}
+              className="preview-image"
+              src={frame.dataUrl}
+              style={{
+                height: frame.height * scale,
+                width: frame.width * scale
+              }}
+            />
+          ) : (
+            <div className="preview-empty">
+              <strong>还没有可预览的帧</strong>
+              <p>导入序列或图集后，就可以在这里查看动画预览。</p>
+            </div>
+          )}
         </div>
-      ) : null}
+      </div>
     </section>
   )
 }

@@ -1,48 +1,33 @@
 import { useState } from 'react'
 import type { ExportSettings } from '@shared/types'
 
-interface ExportPanelProps {
-  exportFrameCount: number; exportSettings: ExportSettings; onExportGif: () => void; onExportSequence: () => void
-  onExportSheet: () => void; onUpdateExport: (patch: Partial<ExportSettings>, recordHistory?: boolean) => void; recommendedLayout: { columns: number; rows: number }
-}
+interface ExportPanelProps { exportFrameCount: number; exportSettings: ExportSettings; onExportGif: () => void; onExportSequence: () => void; onExportSheet: () => void; onUpdateExport: (patch: Partial<ExportSettings>, recordHistory?: boolean) => void; recommendedLayout: { columns: number; rows: number } }
 const parseInteger = (value: string): number => Math.max(0, Number.parseInt(value || '0', 10) || 0)
 
 export function ExportPanel({ exportFrameCount, exportSettings, onExportGif, onExportSequence, onExportSheet, onUpdateExport, recommendedLayout }: ExportPanelProps) {
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(false)
+  if (exportFrameCount === 0) return null
 
   return (
-    <section className="panel stack">
-      <div className="section-heading">
-        <span className="eyebrow">输出</span>
-        <h2>快速导出</h2>
-      </div>
+    <section className="panel stack" style={{ background: 'transparent', border: 'none', padding: 0 }}>
+      <button className="primary-button full-width-button" onClick={() => setIsOpen(true)} type="button" style={{ padding: '0.8rem', fontSize: '1rem' }}>
+        🚀 配置并导出...
+      </button>
 
-      <div className="input-with-icon">
-        <select onChange={(e) => onUpdateExport({ imageFormat: e.target.value as ExportSettings['imageFormat'] })} value={exportSettings.imageFormat}>
-          <option value="png">格式：PNG</option>
-          <option value="webp">格式：WEBP</option>
-          <option value="jpeg">格式：JPEG</option>
-        </select>
-        <button className="secondary-button icon-btn" onClick={() => setIsAdvancedOpen(true)} title="高级输出设置" type="button">⚙️</button>
-      </div>
-
-      <div className="export-action-stack">
-        <button className="primary-button" disabled={exportFrameCount === 0} onClick={onExportSequence} type="button">导出序列</button>
-        <div className="dual-action-row">
-          <button className="secondary-button" disabled={exportFrameCount === 0} onClick={onExportSheet} type="button">导出图集</button>
-          <button className="secondary-button" disabled={exportFrameCount === 0} onClick={onExportGif} type="button">导出 GIF</button>
-        </div>
-      </div>
-
-      {isAdvancedOpen ? (
-        <div className="modal-overlay" onClick={() => setIsAdvancedOpen(false)}>
+      {isOpen ? (
+        <div className="modal-overlay" onClick={() => setIsOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ width: '420px' }}>
             <div className="modal-header">
-              <div><span className="eyebrow">设置</span><h2>高级输出参数</h2></div>
-              <button className="secondary-button" onClick={() => setIsAdvancedOpen(false)} type="button">关闭</button>
+              <div><span className="eyebrow">输出</span><h2>高级导出设置</h2></div>
+              <button className="secondary-button" onClick={() => setIsOpen(false)} type="button">关闭</button>
             </div>
             
             <div className="form-grid">
+              <label>输出格式
+                <select onChange={(e) => onUpdateExport({ imageFormat: e.target.value as any })} value={exportSettings.imageFormat}>
+                  <option value="png">PNG</option><option value="webp">WEBP</option><option value="jpeg">JPEG</option>
+                </select>
+              </label>
               <label>文件前缀<input onChange={(e) => onUpdateExport({ fileNamePrefix: e.target.value })} type="text" value={exportSettings.fileNamePrefix} /></label>
               <label>补零位数<input className="number-input" min={1} onChange={(e) => onUpdateExport({ padding: Math.max(1, parseInteger(e.target.value)) })} type="number" value={exportSettings.padding} /></label>
               <label>导出跳帧<input className="number-input" min={0} onChange={(e) => onUpdateExport({ exportSkip: parseInteger(e.target.value) })} type="number" value={exportSettings.exportSkip} /></label>
@@ -55,8 +40,16 @@ export function ExportPanel({ exportFrameCount, exportSettings, onExportGif, onE
             </div>
 
             <div className="hint-card">
-              <span className="eyebrow">当前排版建议</span>
-              <p>近似方形布局：{recommendedLayout.rows} 行 x {recommendedLayout.columns} 列<br />可导出帧数：{exportFrameCount}</p>
+              <span className="eyebrow">建议</span>
+              <p>近似方形排版为 {recommendedLayout.rows} 行 x {recommendedLayout.columns} 列。共将输出 {exportFrameCount} 帧。</p>
+            </div>
+
+            <div className="export-action-stack" style={{ marginTop: '0.5rem' }}>
+              <button className="primary-button" onClick={() => { setIsOpen(false); onExportSequence(); }} type="button">导出单帧序列</button>
+              <div className="dual-action-row">
+                <button className="secondary-button" onClick={() => { setIsOpen(false); onExportSheet(); }} type="button">导出大图集</button>
+                <button className="secondary-button" onClick={() => { setIsOpen(false); onExportGif(); }} type="button">导出 GIF</button>
+              </div>
             </div>
           </div>
         </div>

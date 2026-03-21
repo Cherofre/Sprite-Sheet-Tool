@@ -1,9 +1,14 @@
 interface ImportPanelProps {
+  canClear?: boolean
   canRedo: boolean
   canUndo: boolean
   frameCount: number
   isBusy: boolean
+  onClearWorkspace?: () => void
   onDeleteSelected: () => void
+  onDropFiles?: (files: File[]) => void
+  onImportFiles?: () => void
+  onImportFolder?: () => void
   onRedo: () => void
   onReverse: () => void
   onRotate: (rotation: 90 | 180 | 270) => void
@@ -31,9 +36,9 @@ export function ImportPanel({
 
   return (
     <section className="panel stack">
-      <div className="section-heading compact">
+      <div className="section-heading">
         <span className="eyebrow">序列</span>
-        <h3>快捷操作</h3>
+        <h2>快捷编辑</h2>
       </div>
 
       <div className="button-grid action-grid-three">

@@ -1044,6 +1044,329 @@ export default function App() {
           <span className="eyebrow-header">桌面工具链</span>
           <h1>序列图工具</h1>
         </div>
+        <div className="app-header-right compact-header-actions">
+          <button
+            className="ghost-button"
+            disabled={isBusy}
+            onClick={() => {
+              void handleImportFiles()
+            }}
+            type="button"
+          >
+            导入文件
+          </button>
+          <button
+            className="ghost-button"
+            disabled={isBusy}
+            onClick={() => {
+              void handleImportFolder()
+            }}
+            type="button"
+          >
+            导入文件夹
+          </button>
+          <button className="ghost-button" disabled={!canClear || isBusy} onClick={handleClearWorkspace} type="button">
+            清空
+          </button>
+          <button className="ghost-button header-button" onClick={() => setIsHelpOpen(true)} type="button">
+            快捷键说明
+          </button>
+        </div>
+      </header>
+
+      {errorMessage ? (
+        <div className="error-banner">
+          <span>{errorMessage}</span>
+          <button className="secondary-button" onClick={clearError} type="button">
+            关闭
+          </button>
+        </div>
+      ) : null}
+
+      <div className="app-grid">
+        <aside className="sidebar-column" style={!sheet.source ? { display: 'none' } : undefined}>
+          <SheetPanel
+            canApply={sheetGeometry.canApply}
+            columns={sheetGeometry.columns}
+            exportSettings={exportSettings}
+            frameHeight={sheetGeometry.frameHeight}
+            frameWidth={sheetGeometry.frameWidth}
+            isBusy={isBusy}
+            onApply={() => {
+              void handleApplySheet()
+            }}
+            onChooseCandidate={handleChooseCandidate}
+            onExportSplitSequence={() => {
+              void handleExportSplitSequence()
+            }}
+            onUpdateSheet={handleUpdateSheet}
+            predictedFrameCount={sheetGeometry.predictedFrameCount}
+            rows={sheetGeometry.rows}
+            sheet={sheet}
+          />
+        </aside>
+
+        <main className="preview-column">
+          {frames.length === 0 && !sheet.source ? (
+            <div
+              className="empty-workspace-drop"
+              onDragOver={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                const droppedFiles = Array.from(event.dataTransfer.files)
+                if (droppedFiles.length > 0) {
+                  void importDroppedFiles(droppedFiles)
+                }
+              }}
+            >
+              <h2>开始创作</h2>
+              <p>将图片、GIF 动图或文件夹拖拽至此</p>
+              <div className="button-grid">
+                <button
+                  className="primary-button"
+                  onClick={() => {
+                    void handleImportFiles()
+                  }}
+                  type="button"
+                >
+                  选择文件
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    void handleImportFolder()
+                  }}
+                  type="button"
+                >
+                  选择文件夹
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <PreviewStage
+                background={playback.background}
+                frame={currentFrame}
+                onZoomChange={(zoom) => updatePlaybackSettings({ zoom }, false)}
+                zoom={playback.zoom}
+              />
+
+              <div className="viewport-toolbar">
+                <div className="vt-left">
+                  <select
+                    onChange={(event) => updatePlaybackSettings({ background: event.target.value as typeof playback.background }, false)}
+                    value={playback.background}
+                  >
+                    <option value="checker">棋盘</option>
+                    <option value="black">纯黑</option>
+                    <option value="white">纯白</option>
+                  </select>
+                  <select
+                    onChange={(event) =>
+                      updatePlaybackSettings(
+                        { zoom: event.target.value === 'fit' ? 'fit' : Number(event.target.value) },
+                        false
+                      )
+                    }
+                    value={String(playback.zoom)}
+                  >
+                    {typeof playback.zoom === 'number' && ![50, 100, 200, 400].includes(playback.zoom) ? (
+                      <option value={String(playback.zoom)}>{playback.zoom}%</option>
+                    ) : null}
+                    <option value="fit">适应</option>
+                    <option value="50">50%</option>
+                    <option value="100">100%</option>
+                    <option value="200">200%</option>
+                    <option value="400">400%</option>
+                  </select>
+                  {currentFrame ? (
+                    <span className="compact-info" title={`${currentFrame.name} (${currentFrame.width}x${currentFrame.height})`}>
+                      {currentFrame.name} | {currentFrame.width}x{currentFrame.height}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="vt-center">
+                  <button className="secondary-button toolbar-nav-btn" disabled={frames.length === 0} onClick={handlePrevious} type="button">
+                    |◀
+                  </button>
+                  <button className="play-action-btn" disabled={frames.length === 0} onClick={handleTogglePlay} type="button">
+                    {playback.isPlaying ? '暂停' : '播放'}
+                  </button>
+                  <button className="secondary-button toolbar-nav-btn" disabled={frames.length === 0} onClick={handleNext} type="button">
+                    ▶|
+                  </button>
+                </div>
+
+                <div className="vt-right">
+                  <div
+                    className="fps-control"
+                    onWheel={(event) => {
+                      event.preventDefault()
+                      const step = event.deltaY < 0 ? 1 : -1
+                      updatePlaybackSettings({ fps: Math.max(1, Math.min(60, playback.fps + step)) })
+                    }}
+                  >
+                    <span>FPS: {playback.fps}</span>
+                    <input
+                      max={60}
+                      min={1}
+                      onChange={(event) => updatePlaybackSettings({ fps: Number(event.target.value) })}
+                      type="range"
+                      value={playback.fps}
+                    />
+                  </div>
+                  <span className="compact-counter">{frames.length === 0 ? '0/0' : `${playback.currentFrame + 1}/${frames.length}`}</span>
+                </div>
+              </div>
+
+              <FrameTimeline
+                currentFrame={playback.currentFrame}
+                frames={frames}
+                onMoveFrame={moveFrame}
+                onSelectFrame={selectFrame}
+                selectedFrameIds={selectedFrameIds}
+              />
+            </>
+          )}
+        </main>
+
+        <aside className="sidebar-column" style={frames.length === 0 ? { display: 'none' } : undefined}>
+          <ImportPanel
+            canRedo={canRedo}
+            canUndo={canUndo}
+            frameCount={frames.length}
+            isBusy={isBusy}
+            onDeleteSelected={deleteSelectedFrames}
+            onRedo={redo}
+            onReverse={reverseFrames}
+            onRotate={(rotation) => {
+              void handleRotate(rotation)
+            }}
+            onUndo={undo}
+            selectedCount={selectedFrameIds.length}
+            statusMessage={statusMessage}
+          />
+
+          <PlaybackPanel
+            frameCount={frames.length}
+            onUpdatePlayback={updatePlaybackSettings}
+            playback={playback}
+          />
+
+          <ExportPanel
+            exportFrameCount={exportFrames.length}
+            exportSettings={exportSettings}
+            onExportGif={() => {
+              void handleExportGif()
+            }}
+            onExportSequence={() => {
+              void handleExportSequence()
+            }}
+            onExportSheet={() => {
+              void handleExportSheet()
+            }}
+            onUpdateExport={updateExportSettings}
+            recommendedLayout={recommendedLayout}
+          />
+        </aside>
+      </div>
+
+      {isBusy && operationProgress ? (
+        <div className="busy-overlay">
+          <div className="busy-card">
+            <strong>{operationProgress.title}</strong>
+            <span>{operationProgress.detail}</span>
+            <div className="busy-progress-track">
+              <div
+                className={operationProgress!.percent === null ? 'busy-progress-bar indeterminate' : 'busy-progress-bar'}
+                style={
+                  operationProgress!.percent === null
+                    ? undefined
+                    : { width: `${Math.max(0, Math.min(100, operationProgress!.percent!))}%` }
+                }
+              />
+            </div>
+            <small>
+              {operationProgress!.percent === null
+                ? '当前步骤无法精确估时，但任务仍在继续。'
+                : `已完成 ${Math.round(operationProgress.percent)}%`}
+            </small>
+            {operationProgress!.cancellable ? (
+              <div className="busy-card-actions">
+                <button className="secondary-button" onClick={cancelCurrentOperation} type="button">
+                  取消当前任务
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {isHelpOpen ? (
+        <div className="modal-overlay" onClick={() => setIsHelpOpen(false)}>
+          <div
+            className="modal-card"
+            onClick={(event) => {
+              event.stopPropagation()
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">帮助</span>
+                <h2>快捷键与说明</h2>
+              </div>
+              <button className="secondary-button" onClick={() => setIsHelpOpen(false)} type="button">
+                关闭
+              </button>
+            </div>
+
+            <div className="help-grid">
+              {shortcutRows.map(([shortcut, description]) => (
+                <div className="help-row" key={shortcut}>
+                  <kbd>{shortcut}</kbd>
+                  <span>{description}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="hint-card">
+              <span className="eyebrow">补充说明</span>
+              <p>
+                1. `Esc` 会优先关闭当前说明窗口，其次取消正在执行的长任务。
+                <br />
+                2. 图片序列与拆分序列导出如果中途取消，会自动清理这次已写出的半成品文件。
+                <br />
+                3. 在输入框或下拉框里编辑时，快捷键不会抢占你的输入。
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isWindowDragActive ? (
+        <div className="drop-overlay">
+          <div className="drop-overlay-card">
+            <strong>松开即可导入</strong>
+            <span>支持图片、GIF 和文件夹。规则序列图会尽量自动识别，并在置信度足够时直接开始播放。</span>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+
+  /*
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-header-left">
+          <span className="eyebrow-header">桌面工具链</span>
+          <h1>序列图工具</h1>
+        </div>
         <div className="app-header-right">
           <p>面向游戏特效师的高密度桌面工作台，支持快速导入、自动识别、预览拆分与稳定导出。</p>
           <div className="header-actions">
@@ -1265,20 +1588,20 @@ export default function App() {
             <span>{operationProgress.detail}</span>
             <div className="busy-progress-track">
               <div
-                className={operationProgress.percent === null ? 'busy-progress-bar indeterminate' : 'busy-progress-bar'}
+                className={operationProgress!.percent === null ? 'busy-progress-bar indeterminate' : 'busy-progress-bar'}
                 style={
-                  operationProgress.percent === null
+                  operationProgress!.percent === null
                     ? undefined
-                    : { width: `${Math.max(0, Math.min(100, operationProgress.percent))}%` }
+                    : { width: `${Math.max(0, Math.min(100, operationProgress!.percent!))}%` }
                 }
               />
             </div>
             <small>
-              {operationProgress.percent === null
+              {operationProgress!.percent === null
                 ? '当前步骤无法精确估时，但任务仍在继续。'
                 : `已完成 ${Math.round(operationProgress.percent)}%`}
             </small>
-            {operationProgress.cancellable ? (
+            {operationProgress!.cancellable ? (
               <div className="busy-card-actions">
                 <button className="secondary-button" onClick={cancelCurrentOperation} type="button">
                   取消当前任务
@@ -1340,4 +1663,5 @@ export default function App() {
       ) : null}
     </div>
   )
+  */
 }

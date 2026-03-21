@@ -4,13 +4,13 @@ interface ImportPanelProps {
 }
 
 export function ImportPanel({ canRedo, canUndo, frameCount, isBusy, onDeleteSelected, onRedo, onReverse, onRotate, onUndo, selectedCount, statusMessage }: ImportPanelProps) {
-  if (frameCount === 0) return null; // 没图时直接隐藏该面板
+  if (frameCount === 0) return null
 
   return (
     <section className="panel stack">
-      <div className="section-heading compact">
+      <div className="section-heading">
         <span className="eyebrow">序列</span>
-        <h3>快捷操作</h3>
+        <h2>快捷编辑</h2>
       </div>
 
       <div className="button-grid action-grid-three">

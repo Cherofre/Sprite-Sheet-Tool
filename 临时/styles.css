@@ -1,15 +1,130 @@
 /* ================== 全新重构组件样式 ================== */
 
-/* 顶部工具栏 */
-.top-toolbar {
+/* 修复原生 Select 下拉框颜色 */
+select {
+  appearance: none;
+  background-color: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%238b92a1' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  padding-right: 1.8rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+select:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+select option {
+  background-color: #1e2227; /* 纯正深色背景 */
+  color: #fff;
+}
+
+/* 顶部低调幽灵按钮 */
+.ghost-button {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  transition: all 0.15s;
+}
+.ghost-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 美化原生滑轨 */
+input[type='range'] {
+  -webkit-appearance: none;
+  background: transparent;
+  width: 90px;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 14px;
+  width: 14px;
+  background: var(--accent);
+  border-radius: 50%;
+  margin-top: -5px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  transition: transform 0.1s;
+}
+input[type='range']::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+/* 视口底部高密度工具条 */
+.viewport-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.8rem;
+  flex-shrink: 0;
+  gap: 1rem;
+}
+.vt-left, .vt-center, .vt-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.vt-left { flex: 1; justify-content: flex-start; }
+.vt-center { flex: 0 0 auto; justify-content: center; }
+.vt-right { flex: 1; justify-content: flex-end; }
+
+/* 独立播放按钮 */
+.play-action-btn {
+  background: var(--accent);
+  color: #111;
+  font-weight: bold;
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 1.2rem;
+  border: none;
+  min-width: 76px;
+}
+.play-action-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: scale(1.03);
+}
+
+.compact-info {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-left: 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.fps-control {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding-right: 0.75rem;
-  border-right: 1px solid var(--border);
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.2);
+}
+.fps-control span {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  min-width: 50px;
 }
 
-/* 中间空状态引导区 */
+/* 空状态引导区 */
 .empty-workspace-drop {
   flex: 1;
   display: flex;
@@ -25,74 +140,4 @@
 .empty-workspace-drop:hover {
   background: rgba(255, 138, 77, 0.05);
   border-color: rgba(255, 138, 77, 0.3);
-}
-.empty-workspace-drop h2 {
-  color: #fff;
-  font-size: 1.5rem;
-  margin: 0;
-}
-.empty-workspace-drop p {
-  color: var(--text-dim);
-  margin: 0 0 0.5rem 0;
-}
-
-/* 视口底部控制条 (AE/PR 监视器风格) */
-.viewport-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.4rem 0.8rem;
-  flex-shrink: 0;
-}
-.vt-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 1;
-}
-.vt-center {
-  justify-content: center;
-}
-.vt-right {
-  justify-content: flex-end;
-  color: var(--text-dim);
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-}
-.toolbar-btn {
-  background: transparent;
-  border: none;
-  min-height: 28px;
-  padding: 0.2rem 0.6rem;
-}
-.toolbar-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-}
-.toolbar-btn.play-btn {
-  color: var(--accent);
-  font-weight: bold;
-}
-.toolbar-select {
-  background: rgba(0,0,0,0.2);
-  border-color: transparent;
-  padding: 0.2rem 1.6rem 0.2rem 0.6rem;
-  min-height: 28px;
-  font-size: 0.75rem;
-}
-
-/* 带有设置图标的输入组 */
-.input-with-icon {
-  display: flex;
-  gap: 0.4rem;
-}
-.input-with-icon select {
-  flex: 1;
-}
-.icon-btn {
-  padding: 0.4rem 0.6rem;
-  min-width: 40px;
 }
