@@ -1,0 +1,17 @@
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+
+import type { DesktopApi } from '@shared/types'
+
+const api: DesktopApi = {
+  chooseDirectory: (title) => ipcRenderer.invoke('directory:choose', title),
+  getPathForDroppedFile: (file) => webUtils.getPathForFile(file),
+  loadDirectory: (dirPath) => ipcRenderer.invoke('directory:load', dirPath),
+  loadFiles: (paths) => ipcRenderer.invoke('files:load', paths),
+  loadPaths: (paths) => ipcRenderer.invoke('paths:load', paths),
+  openDirectory: () => ipcRenderer.invoke('directory:open'),
+  openFiles: () => ipcRenderer.invoke('files:open'),
+  saveBinaryFile: (input) => ipcRenderer.invoke('file:save-binary', input),
+  writeBinaryFile: (input) => ipcRenderer.invoke('file:write-binary', input)
+}
+
+contextBridge.exposeInMainWorld('desktopApi', api)

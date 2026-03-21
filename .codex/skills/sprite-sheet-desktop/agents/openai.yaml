@@ -1,0 +1,4 @@
+interface:
+  display_name: Sprite Sheet Desktop
+  short_description: Build and maintain the sprite sheet desktop app
+  category: developer
