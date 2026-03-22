@@ -20,7 +20,7 @@ interface PreviewThumb {
   index: number
 }
 
-const PREVIEW_THUMB_SIZE = 68
+const PREVIEW_THUMB_SIZE = 62
 
 export function SplitPreview({
   canApply,
@@ -50,8 +50,8 @@ export function SplitPreview({
           const column = index % columns
           const scale = Math.min(PREVIEW_THUMB_SIZE / frameWidth, PREVIEW_THUMB_SIZE / frameHeight)
           const canvas = document.createElement('canvas')
-          canvas.width = Math.max(24, Math.round(frameWidth * scale))
-          canvas.height = Math.max(24, Math.round(frameHeight * scale))
+          canvas.width = Math.max(20, Math.round(frameWidth * scale))
+          canvas.height = Math.max(20, Math.round(frameHeight * scale))
 
           const context = canvas.getContext('2d')
           if (!context) {
@@ -114,9 +114,9 @@ export function SplitPreview({
       {canApply ? (
         <div className="split-sample-grid">
           {sampleThumbs.map((thumb) => (
-            <div className="split-sample-card" key={thumb.index}>
+            <div className="split-sample-thumb" key={thumb.index}>
               <img alt={`拆分预览 ${thumb.index + 1}`} src={thumb.dataUrl} />
-              <span>#{thumb.index + 1}</span>
+              <span className="split-sample-index">#{thumb.index + 1}</span>
             </div>
           ))}
         </div>
