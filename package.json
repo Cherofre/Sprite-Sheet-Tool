@@ -1,6 +1,6 @@
 {
   "name": "sprite-sheet-tool",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "author": "OpenAI Codex",
   "description": "Desktop sprite sheet and frame animation tool for game VFX artists.",
