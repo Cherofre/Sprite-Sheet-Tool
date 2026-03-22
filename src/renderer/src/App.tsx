@@ -103,8 +103,8 @@ interface SmokeBridge {
 const shortcutRows = [
   ['F1', '打开快捷键说明'],
   ['Space', '播放 / 暂停'],
-  ['Shift + F', '视图重置到适应'],
-  ['D / F / ← / → / ↑ / ↓', '上一帧 / 下一帧'],
+  ['F', '视图重置到适应'],
+  ['A / D / ← / → / ↑ / ↓', '上一帧 / 下一帧'],
   ['Home / End', '跳到首帧 / 末帧'],
   ['Delete / Backspace', '删除选中帧'],
   ['Ctrl/Cmd + A', '全选时间轴帧'],
@@ -1477,7 +1477,7 @@ export default function App() {
       return
     }
 
-    if ((event.key.toLowerCase() === 'f' && event.shiftKey) || (isPrimaryModifier && event.key === '0')) {
+    if (event.key.toLowerCase() === 'f' || (isPrimaryModifier && event.key === '0')) {
       event.preventDefault()
       updatePlaybackSettings({ zoom: 'fit' }, false)
       return
@@ -1501,13 +1501,13 @@ export default function App() {
       return
     }
 
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key.toLowerCase() === 'd') {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key.toLowerCase() === 'a') {
       event.preventDefault()
       handlePrevious()
       return
     }
 
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key.toLowerCase() === 'f') {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key.toLowerCase() === 'd') {
       event.preventDefault()
       handleNext()
       return
@@ -1731,8 +1731,9 @@ export default function App() {
           <button className="ghost-button" disabled={!canClear || isBusy} onClick={handleClearWorkspace} type="button">
             清空
           </button>
-          <button className="ghost-button header-button" onClick={() => setIsHelpOpen(true)} type="button">
-            快捷键说明
+          <button className="ghost-button header-button" onClick={() => setIsHelpOpen((current) => !current)} type="button">
+            <span>快捷键说明</span>
+            <span className="shortcut-tag">F1</span>
           </button>
           <button className="ghost-button icon-only-button" onClick={() => setIsSettingsOpen(true)} title="设置" type="button">
             ⚙
@@ -1877,7 +1878,9 @@ export default function App() {
               <>
                 <PreviewStage
                   background={playback.background}
+                  canClearWorkspace={canClear}
                   frame={currentFrame}
+                  onRequestClearWorkspace={handleClearWorkspace}
                   onZoomChange={(zoom) => updatePlaybackSettings({ zoom }, false)}
                   zoom={playback.zoom}
                 />
@@ -1915,7 +1918,8 @@ export default function App() {
                       onClick={() => updatePlaybackSettings({ zoom: 'fit' }, false)}
                       type="button"
                     >
-                      重置
+                      <span>重置</span>
+                      <span className="shortcut-tag">F</span>
                     </button>
                   </div>
 
@@ -1924,7 +1928,8 @@ export default function App() {
                       |◀
                     </button>
                     <button className="play-action-btn" disabled={frames.length === 0} onClick={handleTogglePlay} type="button">
-                      {playback.isPlaying ? '暂停' : '播放'}
+                      <span>{playback.isPlaying ? '暂停' : '播放'}</span>
+                      <span className="shortcut-tag">Space</span>
                     </button>
                     <button className="secondary-button toolbar-nav-btn" disabled={frames.length === 0} onClick={handleNext} type="button">
                       ▶|
@@ -2024,27 +2029,29 @@ export default function App() {
                   {isDrawerFixed('right') ? '已固定' : '固定'}
                 </button>
               </div>
-              <ImportPanel
-                canRedo={canRedo}
-                canUndo={canUndo}
-                frameCount={frames.length}
-                isBusy={isBusy}
-                onDeleteSelected={deleteSelectedFrames}
-                onRedo={redo}
-                onReverse={reverseFrames}
-                onRotate={(rotation) => {
-                  void handleRotate(rotation)
-                }}
-                onUndo={undo}
-                selectedCount={selectedFrameIds.length}
-                statusMessage={statusMessage}
-              />
+              <div className="drawer-scroll-stack">
+                <ImportPanel
+                  canRedo={canRedo}
+                  canUndo={canUndo}
+                  frameCount={frames.length}
+                  isBusy={isBusy}
+                  onDeleteSelected={deleteSelectedFrames}
+                  onRedo={redo}
+                  onReverse={reverseFrames}
+                  onRotate={(rotation) => {
+                    void handleRotate(rotation)
+                  }}
+                  onUndo={undo}
+                  selectedCount={selectedFrameIds.length}
+                  statusMessage={statusMessage}
+                />
 
-              <PlaybackPanel
-                frameCount={frames.length}
-                onUpdatePlayback={updatePlaybackSettings}
-                playback={playback}
-              />
+                <PlaybackPanel
+                  frameCount={frames.length}
+                  onUpdatePlayback={updatePlaybackSettings}
+                  playback={playback}
+                />
+              </div>
 
               <ExportPanel
                 canExportSplitSequence={sheetGeometry.canApply}

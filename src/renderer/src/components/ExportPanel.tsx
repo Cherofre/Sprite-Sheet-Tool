@@ -202,7 +202,7 @@ export function ExportPanel({
 
   return (
     <>
-      <section className="panel stack export-launcher">
+      <section className="panel stack export-launcher export-launcher-sticky">
         <button className="secondary-button full-width-button export-launcher-button" onClick={() => setOpen(true)} type="button">
           配置并导出
         </button>

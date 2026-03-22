@@ -1,5 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEventHandler } from 'react'
 
 import type { BackgroundMode, FrameItem } from '@shared/types'
 
@@ -7,9 +8,16 @@ import { useEditorStore } from '../store/editorStore'
 
 interface PreviewStageProps {
   background: BackgroundMode
+  canClearWorkspace?: boolean
   frame?: FrameItem
+  onRequestClearWorkspace?: () => void
   onZoomChange?: (zoom: number) => void
   zoom: number | 'fit'
+}
+
+interface PanState {
+  x: number
+  y: number
 }
 
 const backgroundClassByMode: Record<BackgroundMode, string> = {
@@ -31,9 +39,20 @@ const copyFrameToClipboard = async (frame: FrameItem): Promise<void> => {
   await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
 }
 
-export function PreviewStage({ background, frame, onZoomChange, zoom }: PreviewStageProps) {
+export function PreviewStage({
+  background,
+  canClearWorkspace = false,
+  frame,
+  onRequestClearWorkspace,
+  onZoomChange,
+  zoom
+}: PreviewStageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const panStartRef = useRef<{ origin: PanState; startX: number; startY: number } | null>(null)
   const [bounds, setBounds] = useState({ height: 0, width: 0 })
+  const [pan, setPan] = useState<PanState>({ x: 0, y: 0 })
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false)
+  const [isPanning, setIsPanning] = useState(false)
   const setErrorMessage = useEditorStore((state) => state.setErrorMessage)
   const setStatusMessage = useEditorStore((state) => state.setStatusMessage)
   const updatePlaybackSettings = useEditorStore((state) => state.updatePlaybackSettings)
@@ -56,6 +75,38 @@ export function PreviewStage({ background, frame, onZoomChange, zoom }: PreviewS
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    if (zoom === 'fit') {
+      setPan({ x: 0, y: 0 })
+    }
+  }, [zoom])
+
+  useEffect(() => {
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      if (!panStartRef.current) {
+        return
+      }
+
+      setPan({
+        x: panStartRef.current.origin.x + (event.clientX - panStartRef.current.startX),
+        y: panStartRef.current.origin.y + (event.clientY - panStartRef.current.startY)
+      })
+    }
+
+    const handlePointerUp = () => {
+      panStartRef.current = null
+      setIsPanning(false)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [])
+
   let scale = 1
   if (frame) {
     scale =
@@ -64,7 +115,7 @@ export function PreviewStage({ background, frame, onZoomChange, zoom }: PreviewS
         : zoom / 100
   }
 
-  const handleWheel: React.WheelEventHandler<HTMLDivElement> = (event) => {
+  const handleWheel: WheelEventHandler<HTMLDivElement> = (event) => {
     if (!frame || !onZoomChange) {
       return
     }
@@ -75,101 +126,193 @@ export function PreviewStage({ background, frame, onZoomChange, zoom }: PreviewS
     onZoomChange(nextZoom)
   }
 
-  return (
-    <section className="preview-shell">
-      <div className="preview-stage-frame">
-        <ContextMenu.Root>
-          <ContextMenu.Trigger asChild>
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 1 || !frame) {
+      return
+    }
+
+    event.preventDefault()
+    panStartRef.current = {
+      origin: pan,
+      startX: event.clientX,
+      startY: event.clientY
+    }
+    setIsPanning(true)
+  }
+
+  const confirmClearWorkspace = () => {
+    setIsClearConfirmOpen(false)
+    onRequestClearWorkspace?.()
+  }
+
+  const clearModal =
+    isClearConfirmOpen && typeof document !== 'undefined'
+      ? createPortal(
+          <div className="modal-overlay" onClick={() => setIsClearConfirmOpen(false)}>
             <div
-              className={backgroundClassByMode[background]}
-              onDragStart={(event) => {
-                event.preventDefault()
+              className="modal-card settings-modal-card"
+              onClick={(event) => {
+                event.stopPropagation()
               }}
-              onWheel={handleWheel}
-              ref={containerRef}
             >
-              {frame ? (
-                <img
-                  alt={frame.name}
-                  className="preview-image"
-                  draggable={false}
-                  src={frame.dataUrl}
-                  style={{
-                    height: frame.height * scale,
-                    width: frame.width * scale
-                  }}
-                />
-              ) : (
-                <div className="preview-empty">
-                  <strong>还没有可预览的帧</strong>
-                  <p>导入序列或图集后，就可以在这里查看动画预览。</p>
+              <div className="modal-header">
+                <div>
+                  <span className="eyebrow">确认</span>
+                  <h2>清空当前工作区？</h2>
                 </div>
-              )}
+                <button className="secondary-button" onClick={() => setIsClearConfirmOpen(false)} type="button">
+                  取消
+                </button>
+              </div>
+
+              <div className="hint-card">
+                <span className="eyebrow">提醒</span>
+                <p>这会清空当前时间轴、拆分设置和导出提示，但不会删除你磁盘上的源文件。</p>
+              </div>
+
+              <div className="button-grid">
+                <button className="secondary-button" onClick={() => setIsClearConfirmOpen(false)} type="button">
+                  取消
+                </button>
+                <button className="primary-button" onClick={confirmClearWorkspace} type="button">
+                  确认清空
+                </button>
+              </div>
             </div>
-          </ContextMenu.Trigger>
+          </div>,
+          document.body
+        )
+      : null
 
-          <ContextMenu.Portal>
-            <ContextMenu.Content className="ContextMenuContent">
-              <ContextMenu.Item
-                className="ContextMenuItem"
-                disabled={!frame}
-                onSelect={() => {
-                  if (!frame) {
-                    return
-                  }
-
-                  void copyFrameToClipboard(frame)
-                    .then(() => {
-                      setStatusMessage('已复制当前帧到剪贴板。')
-                    })
-                    .catch((error) => {
-                      const message = error instanceof Error ? error.message : '复制到剪贴板失败。'
-                      setErrorMessage(message)
-                    })
+  return (
+    <>
+      <section className="preview-shell">
+        <div className="preview-stage-frame">
+          <ContextMenu.Root>
+            <ContextMenu.Trigger asChild>
+              <div
+                className={[
+                  backgroundClassByMode[background],
+                  frame ? 'preview-stage-pannable' : '',
+                  isPanning ? 'preview-stage-panning' : ''
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onDragStart={(event) => {
+                  event.preventDefault()
                 }}
+                onPointerDown={handlePointerDown}
+                onWheel={handleWheel}
+                ref={containerRef}
               >
-                复制到剪贴板
-              </ContextMenu.Item>
+                {frame ? (
+                  <div
+                    className="preview-canvas"
+                    style={{
+                      transform: `translate(${pan.x}px, ${pan.y}px)`
+                    }}
+                  >
+                    <img
+                      alt={frame.name}
+                      className="preview-image"
+                      draggable={false}
+                      src={frame.dataUrl}
+                      style={{
+                        height: frame.height * scale,
+                        width: frame.width * scale
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="preview-empty">
+                    <strong>还没有可预览的帧</strong>
+                    <p>导入序列或图集后，就可以在这里查看动画预览。</p>
+                  </div>
+                )}
+              </div>
+            </ContextMenu.Trigger>
 
-              <ContextMenu.Sub>
-                <ContextMenu.SubTrigger className="ContextMenuSubTrigger">
-                  背景切换
-                  <span className="RightSlot">›</span>
-                </ContextMenu.SubTrigger>
-                <ContextMenu.Portal>
-                  <ContextMenu.SubContent className="ContextMenuSubContent">
-                    <ContextMenu.RadioGroup
-                      onValueChange={(value) => updatePlaybackSettings({ background: value as BackgroundMode }, false)}
-                      value={background}
-                    >
-                      <ContextMenu.RadioItem className="ContextMenuCheckboxItem" value="checker">
-                        棋盘格
-                      </ContextMenu.RadioItem>
-                      <ContextMenu.RadioItem className="ContextMenuCheckboxItem" value="black">
-                        纯黑
-                      </ContextMenu.RadioItem>
-                      <ContextMenu.RadioItem className="ContextMenuCheckboxItem" value="white">
-                        纯白
-                      </ContextMenu.RadioItem>
-                    </ContextMenu.RadioGroup>
-                  </ContextMenu.SubContent>
-                </ContextMenu.Portal>
-              </ContextMenu.Sub>
+            <ContextMenu.Portal>
+              <ContextMenu.Content className="ContextMenuContent">
+                <ContextMenu.Item
+                  className="ContextMenuItem"
+                  disabled={!frame}
+                  onSelect={() => {
+                    if (!frame) {
+                      return
+                    }
 
-              <ContextMenu.Separator className="ContextMenuSeparator" />
+                    void copyFrameToClipboard(frame)
+                      .then(() => {
+                        setStatusMessage('已复制当前帧到剪贴板。')
+                      })
+                      .catch((error) => {
+                        const message = error instanceof Error ? error.message : '复制到剪贴板失败。'
+                        setErrorMessage(message)
+                      })
+                  }}
+                >
+                  复制到剪贴板
+                </ContextMenu.Item>
 
-              <ContextMenu.Item
-                className="ContextMenuItem"
-                onSelect={() => {
-                  updatePlaybackSettings({ zoom: 'fit' }, false)
-                }}
-              >
-                缩放至适应
-              </ContextMenu.Item>
-            </ContextMenu.Content>
-          </ContextMenu.Portal>
-        </ContextMenu.Root>
-      </div>
-    </section>
+                <ContextMenu.Sub>
+                  <ContextMenu.SubTrigger className="ContextMenuSubTrigger">
+                    背景切换
+                    <span className="RightSlot">›</span>
+                  </ContextMenu.SubTrigger>
+                  <ContextMenu.Portal>
+                    <ContextMenu.SubContent className="ContextMenuSubContent">
+                      <ContextMenu.RadioGroup
+                        onValueChange={(value) => updatePlaybackSettings({ background: value as BackgroundMode }, false)}
+                        value={background}
+                      >
+                        <ContextMenu.RadioItem className="ContextMenuCheckboxItem" value="checker">
+                          棋盘格
+                        </ContextMenu.RadioItem>
+                        <ContextMenu.RadioItem className="ContextMenuCheckboxItem" value="black">
+                          纯黑
+                        </ContextMenu.RadioItem>
+                        <ContextMenu.RadioItem className="ContextMenuCheckboxItem" value="white">
+                          纯白
+                        </ContextMenu.RadioItem>
+                      </ContextMenu.RadioGroup>
+                    </ContextMenu.SubContent>
+                  </ContextMenu.Portal>
+                </ContextMenu.Sub>
+
+                <ContextMenu.Separator className="ContextMenuSeparator" />
+
+                <ContextMenu.Item
+                  className="ContextMenuItem"
+                  onSelect={() => {
+                    setPan({ x: 0, y: 0 })
+                    updatePlaybackSettings({ zoom: 'fit' }, false)
+                  }}
+                >
+                  缩放至适应
+                </ContextMenu.Item>
+
+                <ContextMenu.Separator className="ContextMenuSeparator" />
+
+                <ContextMenu.Item
+                  className="ContextMenuItem danger"
+                  disabled={!canClearWorkspace || !onRequestClearWorkspace}
+                  onSelect={() => {
+                    if (!canClearWorkspace || !onRequestClearWorkspace) {
+                      return
+                    }
+                    setIsClearConfirmOpen(true)
+                  }}
+                >
+                  清空工作区...
+                </ContextMenu.Item>
+              </ContextMenu.Content>
+            </ContextMenu.Portal>
+          </ContextMenu.Root>
+        </div>
+      </section>
+
+      {clearModal}
+    </>
   )
 }
