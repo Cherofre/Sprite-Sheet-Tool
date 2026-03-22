@@ -98,6 +98,7 @@ export interface DesktopApi {
   loadPaths(paths: string[]): Promise<ImportedFilePayload[]>
   openDirectory(): Promise<string | null>
   openFiles(): Promise<string[] | null>
+  revealInFileExplorer(targetPath: string): Promise<void>
   saveBinaryFile(input: SaveFileInput): Promise<string | null>
   writeBinaryFile(input: WriteFileInput): Promise<string>
 }

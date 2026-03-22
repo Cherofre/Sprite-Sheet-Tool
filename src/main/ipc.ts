@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
-import { dialog, ipcMain } from 'electron'
+import { dialog, ipcMain, shell } from 'electron'
 
 import { IMAGE_MIME_BY_EXTENSION, SUPPORTED_EXTENSIONS } from '@shared/constants'
 import type { ImportedFilePayload, SaveFileInput, WriteFileInput } from '@shared/types'
@@ -144,6 +144,32 @@ export const registerIpcHandlers = (): void => {
   ipcMain.handle('directory:load', async (_event, dirPath: string) => {
     const files = await flattenPaths([dirPath])
     return loadSupportedFiles(files)
+  })
+
+  ipcMain.handle('path:reveal', async (_event, targetPath: string) => {
+    const stat = await fs.stat(targetPath).catch(() => null)
+
+    if (stat?.isDirectory()) {
+      const error = await shell.openPath(targetPath)
+      if (error) {
+        throw new Error(error)
+      }
+      return
+    }
+
+    if (stat?.isFile()) {
+      shell.showItemInFolder(targetPath)
+      return
+    }
+
+    const parentDirectory = path.dirname(targetPath)
+    const parentStat = await fs.stat(parentDirectory).catch(() => null)
+    if (parentStat?.isDirectory()) {
+      const error = await shell.openPath(parentDirectory)
+      if (error) {
+        throw new Error(error)
+      }
+    }
   })
 
   ipcMain.handle('file:save-binary', async (_event, input: SaveFileInput) => {

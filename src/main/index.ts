@@ -8,10 +8,12 @@ import { registerIpcHandlers } from './ipc'
 
 const createMainWindow = async (): Promise<void> => {
   let rendererRecoveryAttempts = 0
+  const iconPath = !app.isPackaged ? path.join(app.getAppPath(), 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png') : undefined
   const mainWindow = new BrowserWindow({
     autoHideMenuBar: true,
     backgroundColor: '#0e1418',
     height: 960,
+    icon: iconPath,
     minHeight: 760,
     minWidth: 1280,
     show: false,

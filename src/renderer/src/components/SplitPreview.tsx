@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { buildSplitPreviewSampleIndices } from '@features/split/preview'
 import type { ImportedFilePayload } from '@shared/types'
@@ -32,6 +33,7 @@ export function SplitPreview({
   source
 }: SplitPreviewProps) {
   const [sampleThumbs, setSampleThumbs] = useState<PreviewThumb[]>([])
+  const [activeThumb, setActiveThumb] = useState<PreviewThumb | null>(null)
   const sampleIndices = useMemo(() => buildSplitPreviewSampleIndices(predictedFrameCount, 6), [predictedFrameCount])
 
   useEffect(() => {
@@ -99,33 +101,70 @@ export function SplitPreview({
         }
       : undefined
 
-  return (
-    <div className="split-preview-stack">
-      <div className="section-heading compact">
-        <span className="eyebrow">预览</span>
-        <h3>拆分结果</h3>
-      </div>
+  const previewModal =
+    activeThumb && typeof document !== 'undefined'
+      ? createPortal(
+          <div className="modal-overlay" onClick={() => setActiveThumb(null)}>
+            <div
+              className="modal-card split-preview-modal-card"
+              onClick={(event) => {
+                event.stopPropagation()
+              }}
+            >
+              <div className="modal-header">
+                <div>
+                  <span className="eyebrow">预览</span>
+                  <h2>拆分帧 #{activeThumb.index + 1}</h2>
+                </div>
+                <button className="secondary-button" onClick={() => setActiveThumb(null)} type="button">
+                  关闭
+                </button>
+              </div>
 
-      <div className="sheet-preview-stage">
-        <img alt={source.name} className="sheet-preview-image" src={source.dataUrl} />
-        {overlayStyle ? <div className="sheet-preview-overlay" style={overlayStyle} /> : null}
-      </div>
-
-      {canApply ? (
-        <div className="split-sample-grid">
-          {sampleThumbs.map((thumb) => (
-            <div className="split-sample-thumb" key={thumb.index}>
-              <img alt={`拆分预览 ${thumb.index + 1}`} src={thumb.dataUrl} />
-              <span className="split-sample-index">#{thumb.index + 1}</span>
+              <div className="split-preview-modal-body">
+                <img alt={`拆分预览 ${activeThumb.index + 1}`} className="split-preview-modal-image" src={activeThumb.dataUrl} />
+              </div>
             </div>
-          ))}
+          </div>,
+          document.body
+        )
+      : null
+
+  return (
+    <>
+      <div className="split-preview-stack">
+        <div className="section-heading compact">
+          <span className="eyebrow">预览</span>
+          <h3>拆分结果</h3>
         </div>
-      ) : (
-        <div className="hint-card">
-          <span className="eyebrow">检查</span>
-          <p>当前行列或帧尺寸还不能整除源图，请继续调整。</p>
+
+        <div className="sheet-preview-stage">
+          <img alt={source.name} className="sheet-preview-image" src={source.dataUrl} />
+          {overlayStyle ? <div className="sheet-preview-overlay" style={overlayStyle} /> : null}
         </div>
-      )}
-    </div>
+
+        {canApply ? (
+          <div className="split-sample-grid">
+            {sampleThumbs.map((thumb) => (
+              <button
+                className="split-sample-thumb"
+                key={thumb.index}
+                onClick={() => setActiveThumb(thumb)}
+                type="button"
+              >
+                <img alt={`拆分预览 ${thumb.index + 1}`} src={thumb.dataUrl} />
+                <span className="split-sample-index">#{thumb.index + 1}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="hint-card">
+            <span className="eyebrow">检查</span>
+            <p>当前行列或帧尺寸还不能整除源图，请继续调整。</p>
+          </div>
+        )}
+      </div>
+      {previewModal}
+    </>
   )
 }

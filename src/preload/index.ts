@@ -11,6 +11,7 @@ const api: DesktopApi = {
   loadPaths: (paths) => ipcRenderer.invoke('paths:load', paths),
   openDirectory: () => ipcRenderer.invoke('directory:open'),
   openFiles: () => ipcRenderer.invoke('files:open'),
+  revealInFileExplorer: (targetPath) => ipcRenderer.invoke('path:reveal', targetPath),
   saveBinaryFile: (input) => ipcRenderer.invoke('file:save-binary', input),
   writeBinaryFile: (input) => ipcRenderer.invoke('file:write-binary', input)
 }

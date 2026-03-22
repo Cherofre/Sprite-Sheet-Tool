@@ -15,10 +15,16 @@ import { FrameTimeline } from './components/FrameTimeline'
 import { ImportPanel } from './components/ImportPanel'
 import { PlaybackPanel } from './components/PlaybackPanel'
 import { PreviewStage } from './components/PreviewStage'
+import { type UiPreferences, SettingsPanel } from './components/SettingsPanel'
 import { SheetPanel } from './components/SheetPanel'
 import { useCanRedo, useCanUndo, useEditorStore } from './store/editorStore'
 
 const OPERATION_CANCELLED = '__OPERATION_CANCELLED__'
+const UI_PREFERENCES_KEY = 'sprite-sheet-tool.ui-preferences.v1'
+const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  drawerBlurDelayMs: 180,
+  drawerFixedMode: 'none'
+}
 
 const saveFiltersByFormat = {
   gif: [{ extensions: ['gif'], name: 'GIF 动图' }],
@@ -42,6 +48,16 @@ interface OperationController {
 interface OperationConfig {
   cancelledMessage?: string
   onCancelled?: () => Promise<void>
+}
+
+interface DrawerOpenState {
+  left: boolean
+  right: boolean
+}
+
+interface ExportNotice {
+  label: string
+  targetPath: string
 }
 
 interface SmokeBridge {
@@ -188,6 +204,31 @@ const buildProgressState = (progress: TaskProgress): OperationProgressState => {
 const isCancelledError = (error: unknown): boolean =>
   error instanceof Error && error.message === OPERATION_CANCELLED
 
+const loadUiPreferences = (): UiPreferences => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_UI_PREFERENCES
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(UI_PREFERENCES_KEY)
+    if (!rawValue) {
+      return DEFAULT_UI_PREFERENCES
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<UiPreferences>
+    return {
+      drawerBlurDelayMs:
+        typeof parsed.drawerBlurDelayMs === 'number' ? Math.max(0, Math.min(3000, parsed.drawerBlurDelayMs)) : DEFAULT_UI_PREFERENCES.drawerBlurDelayMs,
+      drawerFixedMode:
+        parsed.drawerFixedMode === 'left' || parsed.drawerFixedMode === 'right' || parsed.drawerFixedMode === 'both'
+          ? parsed.drawerFixedMode
+          : DEFAULT_UI_PREFERENCES.drawerFixedMode
+    }
+  } catch {
+    return DEFAULT_UI_PREFERENCES
+  }
+}
+
 export default function App() {
   const frames = useEditorStore((state) => state.frames)
   const playback = useEditorStore((state) => state.playback)
@@ -220,19 +261,32 @@ export default function App() {
 
   const currentFrame = frames[playback.currentFrame]
   const canClear = frames.length > 0 || sheet.enabled
+  const [drawerLocks, setDrawerLocks] = useState<DrawerOpenState>({ left: false, right: false })
+  const [drawerOpen, setDrawerOpen] = useState<DrawerOpenState>({ left: false, right: false })
   const [isExportPanelOpen, setIsExportPanelOpen] = useState(false)
   const [isHelpOpen, setIsHelpOpen] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [pingPongDirection, setPingPongDirection] = useState<1 | -1>(1)
   const [isWindowDragActive, setIsWindowDragActive] = useState(false)
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null)
+  const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => loadUiPreferences())
+  const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
   const operationRef = useRef<OperationController | null>(null)
   const smokeFnsRef = useRef<SmokeBridge | null>(null)
+  const drawerCloseTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
   const windowDragDepthRef = useRef(0)
 
   const clearWindowDragState = useEffectEvent(() => {
     windowDragDepthRef.current = 0
     setIsWindowDragActive(false)
   })
+
+  const isDrawerFixed = (side: 'left' | 'right'): boolean =>
+    uiPreferences.drawerFixedMode === 'both' || uiPreferences.drawerFixedMode === side
+
+  const isDrawerPinned = (side: 'left' | 'right'): boolean => isDrawerFixed(side) || drawerLocks[side]
+
+  const isDrawerVisible = (side: 'left' | 'right'): boolean => isDrawerPinned(side) || drawerOpen[side]
 
   const playbackSequence = useMemo(
     () => buildFrameSequence(frames.length, playback.startFrame, playback.endFrame, playback.previewSkip, playback.reverse),
@@ -251,9 +305,76 @@ export default function App() {
   const recommendedLayout = recommendSheetLayout(exportFrames.length)
   const sheetGeometry = getSheetGeometry(sheet)
 
+  useEffect(() => {
+    window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(uiPreferences))
+  }, [uiPreferences])
+
+  useEffect(() => {
+    const drawerCloseTimers = drawerCloseTimersRef.current
+    return () => {
+      for (const timer of Object.values(drawerCloseTimers)) {
+        if (timer !== null) {
+          window.clearTimeout(timer)
+        }
+      }
+    }
+  }, [])
+
   const waitForPaint = async (): Promise<void> => {
     await new Promise<void>((resolve) => {
       window.requestAnimationFrame(() => resolve())
+    })
+  }
+
+  const clearDrawerCloseTimer = (side: 'left' | 'right'): void => {
+    const timer = drawerCloseTimersRef.current[side]
+    if (timer !== null) {
+      window.clearTimeout(timer)
+      drawerCloseTimersRef.current[side] = null
+    }
+  }
+
+  const openDrawer = useEffectEvent((side: 'left' | 'right') => {
+    clearDrawerCloseTimer(side)
+    setDrawerOpen((state) => ({ ...state, [side]: true }))
+  })
+
+  const scheduleDrawerClose = useEffectEvent((side: 'left' | 'right') => {
+    if (isDrawerPinned(side)) {
+      return
+    }
+
+    clearDrawerCloseTimer(side)
+    drawerCloseTimersRef.current[side] = window.setTimeout(() => {
+      setDrawerOpen((state) => ({ ...state, [side]: false }))
+      drawerCloseTimersRef.current[side] = null
+    }, uiPreferences.drawerBlurDelayMs)
+  })
+
+  const toggleDrawerLock = useEffectEvent((side: 'left' | 'right') => {
+    if (isDrawerFixed(side)) {
+      return
+    }
+
+    clearDrawerCloseTimer(side)
+    setDrawerLocks((state) => {
+      const nextLocked = !state[side]
+      setDrawerOpen((openState) => ({ ...openState, [side]: nextLocked || openState[side] }))
+      return { ...state, [side]: nextLocked }
+    })
+  })
+
+  const updateUiPreferences = (patch: Partial<UiPreferences>): void => {
+    setUiPreferences((state) => ({
+      ...state,
+      ...patch
+    }))
+  }
+
+  const showExportNotice = (label: string, targetPath: string): void => {
+    setExportNotice({
+      label,
+      targetPath
     })
   }
 
@@ -664,6 +785,7 @@ export default function App() {
       async (controller) => {
         await exportFramesToDirectory(directory, exportFrames, 'export-sequence', controller, writtenPaths)
         setStatusMessage(`已导出 ${exportFrames.length} 张图片到 ${directory}`)
+        showExportNotice('单帧导出完成', directory)
       },
       {
         cancelledMessage: writtenPaths.length > 0 ? '已取消导出图片序列，并清理已写出的文件。' : '已取消导出图片序列。',
@@ -710,6 +832,7 @@ export default function App() {
         ensureOperationActive(controller)
         await exportFramesToDirectory(directory, splitFrames, 'export-split-sequence', controller, writtenPaths)
         setStatusMessage(`已导出 ${splitFrames.length} 张拆分图片到 ${directory}`)
+        showExportNotice('拆分导出完成', directory)
       },
       {
         cancelledMessage: writtenPaths.length > 0 ? '已取消拆分导出，并清理已写出的文件。' : '已取消拆分导出。',
@@ -784,6 +907,7 @@ export default function App() {
         }
 
         setStatusMessage(`已导出序列图：${savedPath}`)
+        showExportNotice('序列图导出完成', savedPath)
       },
       '已取消导出序列图。'
     )
@@ -827,6 +951,7 @@ export default function App() {
         }
 
         setStatusMessage(`已导出 GIF：${savedPath}`)
+        showExportNotice('GIF 导出完成', savedPath)
       },
       '已取消导出 GIF。'
     )
@@ -834,12 +959,32 @@ export default function App() {
 
   const handleClearWorkspace = (): void => {
     clearWindowDragState()
+    setExportNotice(null)
     setIsExportPanelOpen(false)
     setPingPongDirection(1)
     resetWorkspace()
   }
 
+  const handleRevealExportLocation = async (): Promise<void> => {
+    if (!exportNotice) {
+      return
+    }
+
+    try {
+      await window.desktopApi.revealInFileExplorer(exportNotice.targetPath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法打开保存位置。'
+      setErrorMessage(message)
+    }
+  }
+
   const handleGlobalKeydown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === 'Escape' && isSettingsOpen) {
+      event.preventDefault()
+      setIsSettingsOpen(false)
+      return
+    }
+
     if (event.key === 'Escape' && isHelpOpen) {
       event.preventDefault()
       setIsHelpOpen(false)
@@ -1136,6 +1281,9 @@ export default function App() {
           <button className="ghost-button header-button" onClick={() => setIsHelpOpen(true)} type="button">
             快捷键说明
           </button>
+          <button className="ghost-button icon-only-button" onClick={() => setIsSettingsOpen(true)} title="设置" type="button">
+            ⚙
+          </button>
         </div>
       </header>
 
@@ -1149,9 +1297,47 @@ export default function App() {
       ) : null}
 
       <div className="app-grid">
-        <div className="app-workspace">
-          <aside className="sidebar-drawer sidebar-drawer-left" style={!sheet.source ? { display: 'none' } : undefined}>
+        <div
+          className={[
+            'app-workspace',
+            isDrawerFixed('left') ? 'workspace-fixed-left' : '',
+            isDrawerFixed('right') ? 'workspace-fixed-right' : ''
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <aside
+            className={[
+              'sidebar-drawer',
+              'sidebar-drawer-left',
+              isDrawerVisible('left') ? 'sidebar-drawer-open' : '',
+              isDrawerFixed('left') ? 'sidebar-drawer-fixed' : ''
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                scheduleDrawerClose('left')
+              }
+            }}
+            onFocusCapture={() => openDrawer('left')}
+            onMouseEnter={() => openDrawer('left')}
+            onMouseLeave={() => scheduleDrawerClose('left')}
+            style={!sheet.source ? { display: 'none' } : undefined}
+          >
             <div className="drawer-content">
+              <div className="drawer-topbar">
+                <span className="drawer-title">图集识别</span>
+                <button
+                  className={isDrawerPinned('left') ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
+                  disabled={isDrawerFixed('left')}
+                  onClick={() => toggleDrawerLock('left')}
+                  title={isDrawerFixed('left') ? '已在设置中固定' : isDrawerPinned('left') ? '取消临时锁定' : '临时锁定左侧抽屉'}
+                  type="button"
+                >
+                  {isDrawerPinned('left') ? '已锁定' : '锁定'}
+                </button>
+              </div>
               <SheetPanel
                 canApply={sheetGeometry.canApply}
                 columns={sheetGeometry.columns}
@@ -1310,7 +1496,25 @@ export default function App() {
             )}
           </main>
 
-          <aside className="sidebar-drawer sidebar-drawer-right" style={frames.length === 0 && !sheet.source ? { display: 'none' } : undefined}>
+          <aside
+            className={[
+              'sidebar-drawer',
+              'sidebar-drawer-right',
+              isDrawerVisible('right') ? 'sidebar-drawer-open' : '',
+              isDrawerFixed('right') ? 'sidebar-drawer-fixed' : ''
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                scheduleDrawerClose('right')
+              }
+            }}
+            onFocusCapture={() => openDrawer('right')}
+            onMouseEnter={() => openDrawer('right')}
+            onMouseLeave={() => scheduleDrawerClose('right')}
+            style={frames.length === 0 && !sheet.source ? { display: 'none' } : undefined}
+          >
             <div className="drawer-handle drawer-handle-right">
               <span className="handle-text">
                 <span className="handle-icon handle-icon-right">«</span>
@@ -1318,6 +1522,18 @@ export default function App() {
               </span>
             </div>
             <div className="drawer-content">
+              <div className="drawer-topbar">
+                <span className="drawer-title">编辑与导出</span>
+                <button
+                  className={isDrawerPinned('right') ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
+                  disabled={isDrawerFixed('right')}
+                  onClick={() => toggleDrawerLock('right')}
+                  title={isDrawerFixed('right') ? '已在设置中固定' : isDrawerPinned('right') ? '取消临时锁定' : '临时锁定右侧抽屉'}
+                  type="button"
+                >
+                  {isDrawerPinned('right') ? '已锁定' : '锁定'}
+                </button>
+              </div>
               <ImportPanel
                 canRedo={canRedo}
                 canUndo={canUndo}
@@ -1444,6 +1660,30 @@ export default function App() {
                 3. 在输入框或下拉框里编辑时，快捷键不会抢占你的输入。
               </p>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      <SettingsPanel
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onUpdate={updateUiPreferences}
+        preferences={uiPreferences}
+      />
+
+      {exportNotice ? (
+        <div className="export-toast">
+          <div className="export-toast-body">
+            <strong>{exportNotice.label}</strong>
+            <span>{exportNotice.targetPath}</span>
+          </div>
+          <div className="export-toast-actions">
+            <button className="secondary-button" onClick={() => void handleRevealExportLocation()} type="button">
+              打开保存位置
+            </button>
+            <button className="secondary-button" onClick={() => setExportNotice(null)} type="button">
+              完成
+            </button>
           </div>
         </div>
       ) : null}
