@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import type { FrameItem, ImportedFilePayload, RotationStep, TaskProgress } from '@shared/types'
+import type { ExportImageFormat, FrameItem, ImportedFilePayload, RotationStep, TaskProgress } from '@shared/types'
 import { GIFEncoder, applyPalette, quantize } from 'gifenc'
 import { decompressFrames, parseGIF } from 'gifuct-js'
 
@@ -10,12 +10,18 @@ import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskSchedu
 import type {
   ComposeSheetWorkerResult,
   DecodeGifWorkerResult,
+  EncodedFrameBatchResult,
   ImageInspectionResult,
   ImageWorkerRequest,
   ImageWorkerResponse
 } from './imageWorkerTypes'
 
 const workerScope = self as DedicatedWorkerGlobalScope
+const MIME_BY_FORMAT: Record<ExportImageFormat, string> = {
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp'
+}
 
 const blobToDataUrl = async (blob: Blob): Promise<string> => {
   if (typeof FileReaderSync !== 'undefined') {
@@ -57,6 +63,19 @@ const createCanvas = (width: number, height: number): OffscreenCanvas => new Off
 const toPngDataUrl = async (canvas: OffscreenCanvas): Promise<string> => {
   const blob = await canvas.convertToBlob({ type: 'image/png' })
   return blobToDataUrl(blob)
+}
+
+const canvasToBytes = async (
+  canvas: OffscreenCanvas,
+  format: ExportImageFormat,
+  quality = format === 'jpeg' ? 0.92 : undefined
+): Promise<Uint8Array> => {
+  const blob = await canvas.convertToBlob({
+    quality,
+    type: MIME_BY_FORMAT[format]
+  })
+
+  return new Uint8Array(await blob.arrayBuffer())
 }
 
 const postProgress = async (id: string, progress: TaskProgress) => {
@@ -416,11 +435,55 @@ const encodeGifInWorker = async (id: string, frames: FrameItem[], fps: number): 
   return encoder.bytes()
 }
 
+const encodeFramesInWorker = async (
+  id: string,
+  frames: FrameItem[],
+  format: ExportImageFormat
+): Promise<EncodedFrameBatchResult> => {
+  const encodedFrames: Uint8Array[] = []
+
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index]
+    const image = await loadBitmap(frame.dataUrl)
+    const canvas = createCanvas(frame.width, frame.height)
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error('Canvas is unavailable')
+    }
+
+    context.clearRect(0, 0, frame.width, frame.height)
+    context.drawImage(image, 0, 0, frame.width, frame.height)
+    encodedFrames.push(await canvasToBytes(canvas, format))
+
+    const processed = index + 1
+    if (shouldReportProgress(processed, frames.length)) {
+      await postProgress(id, {
+        current: processed,
+        percent: (processed / frames.length) * 100,
+        stage: 'encode-frames',
+        total: frames.length
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
+  }
+
+  return {
+    encodedFrames
+  }
+}
+
 workerScope.addEventListener('message', async (event: MessageEvent<ImageWorkerRequest>) => {
   const request = event.data
 
   try {
-    let result: ComposeSheetWorkerResult | DecodeGifWorkerResult | FrameItem[] | ImageInspectionResult | Uint8Array
+    let result:
+      | ComposeSheetWorkerResult
+      | DecodeGifWorkerResult
+      | EncodedFrameBatchResult
+      | FrameItem[]
+      | ImageInspectionResult
+      | Uint8Array
 
     switch (request.kind) {
       case 'split-sheet':
@@ -445,6 +508,9 @@ workerScope.addEventListener('message', async (event: MessageEvent<ImageWorkerRe
       case 'encode-gif':
         result = await encodeGifInWorker(request.id, request.frames, request.fps)
         break
+      case 'encode-frames':
+        result = await encodeFramesInWorker(request.id, request.frames, request.format)
+        break
       case 'inspect-image':
         result = await inspectImageInWorker(request.payload, request.maxSampleSize)
         break
@@ -463,6 +529,23 @@ workerScope.addEventListener('message', async (event: MessageEvent<ImageWorkerRe
           type: 'result'
         } satisfies ImageWorkerResponse,
         [result.buffer]
+      )
+      return
+    }
+
+    if (
+      typeof result === 'object' &&
+      result !== null &&
+      'encodedFrames' in result &&
+      Array.isArray(result.encodedFrames)
+    ) {
+      workerScope.postMessage(
+        {
+          id: request.id,
+          result,
+          type: 'result'
+        } satisfies ImageWorkerResponse,
+        result.encodedFrames.map((frame) => frame.buffer)
       )
       return
     }

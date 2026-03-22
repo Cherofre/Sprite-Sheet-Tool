@@ -18,6 +18,7 @@ const outputDirectory = path.join(repoRoot, 'tmp', 'regression-output')
 const autoDetectPath = path.join(fixtureDirectory, 'auto-detect-grid.png')
 const gifInputPath = path.join(fixtureDirectory, 'roundtrip-input.gif')
 const gifOutputPath = path.join(outputDirectory, 'roundtrip-output.gif')
+const UI_PREFERENCES_KEY = 'sprite-sheet-tool.ui-preferences.v1'
 
 const waitFor = async (predicate, timeoutMs = 10000, intervalMs = 150) => {
   const startedAt = Date.now()
@@ -42,17 +43,19 @@ const waitForSmokeBridge = async (window) => {
   )
 }
 
+const launchApp = async () =>
+  electron.launch({
+    args: [buildEntry],
+    env: {
+      ...process.env,
+      ELECTRON_RENDERER_URL: '',
+      SPRITE_SHEET_CHOOSE_DIRECTORY: outputDirectory,
+      SPRITE_SHEET_SAVE_FILE: gifOutputPath
+    }
+  })
+
 const createAutoDetectFixture = async () => {
-  const colors = [
-    '#ff8a4d',
-    '#ffd166',
-    '#06d6a0',
-    '#4cc9f0',
-    '#f72585',
-    '#b5179e',
-    '#7209b7',
-    '#4361ee'
-  ]
+  const colors = ['#ff8a4d', '#ffd166', '#06d6a0', '#4cc9f0', '#f72585', '#b5179e', '#7209b7', '#4361ee']
 
   const cells = []
   for (let row = 0; row < 4; row += 1) {
@@ -118,6 +121,23 @@ const createTransparentGifFixture = async () => {
   await fs.writeFile(gifInputPath, Buffer.from(encoder.bytes()))
 }
 
+const resetUiPreferences = async () => {
+  const app = await launchApp()
+
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+    await window.evaluate((storageKey) => {
+      window.localStorage.removeItem(storageKey)
+    }, UI_PREFERENCES_KEY)
+  } finally {
+    await app.close()
+  }
+}
+
+const isDrawerOpen = (window, selector) =>
+  window.locator(selector).evaluate((node) => node.classList.contains('sidebar-drawer-open') || node.classList.contains('sidebar-drawer-fixed'))
+
 await fs.rm(fixtureDirectory, { force: true, recursive: true })
 await fs.rm(outputDirectory, { force: true, recursive: true })
 await fs.mkdir(fixtureDirectory, { recursive: true })
@@ -125,18 +145,12 @@ await fs.mkdir(outputDirectory, { recursive: true })
 
 await createAutoDetectFixture()
 await createTransparentGifFixture()
+await resetUiPreferences()
 
-const app = await electron.launch({
-  args: [buildEntry],
-  env: {
-    ...process.env,
-    ELECTRON_RENDERER_URL: '',
-    SPRITE_SHEET_SAVE_FILE: gifOutputPath
-  }
-})
+let app = await launchApp()
 
 try {
-  const window = await app.firstWindow()
+  let window = await app.firstWindow()
   await window.waitForLoadState('domcontentloaded')
   await waitForSmokeBridge(window)
 
@@ -158,6 +172,61 @@ try {
       ? snapshot
       : null
   })
+
+  await window.locator('.drawer-handle-left').hover()
+  await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-left')) ? true : null))
+
+  await window.locator('.drawer-handle-left .handle-lock-button').click()
+  await window.mouse.move(960, 220)
+  await window.waitForTimeout(350)
+  await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-left')) ? true : null))
+
+  await window.locator('.drawer-handle-right').hover()
+  await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-right')) ? true : null))
+  await window.locator('.sidebar-drawer-right .drawer-lock-btn').click()
+  await waitFor(async () => ((await window.locator('.sidebar-drawer-fixed').count()) === 1 ? true : null))
+  await window.locator('.sidebar-drawer-right .drawer-lock-btn').click()
+  await waitFor(async () => ((await window.locator('.sidebar-drawer-fixed').count()) === 0 ? true : null))
+
+  await window.locator('button[title="设置"]').click()
+  await window.locator('.settings-modal-card').waitFor({ state: 'visible' })
+
+  await window.locator('.settings-modal-card input[type="number"]').fill('420')
+  await window.locator('.settings-modal-card select').selectOption('both')
+  await window.locator('.settings-modal-card button').getByText('关闭').click()
+
+  await waitFor(async () => ((await window.locator('.sidebar-drawer-fixed').count()) === 2 ? true : null))
+
+  const storedPreferences = await window.evaluate((storageKey) => {
+    const rawValue = window.localStorage.getItem(storageKey)
+    return rawValue ? JSON.parse(rawValue) : null
+  }, UI_PREFERENCES_KEY)
+
+  if (!storedPreferences || storedPreferences.drawerBlurDelayMs !== 420 || storedPreferences.drawerFixedMode !== 'both') {
+    throw new Error('UI preferences were not persisted after updating the settings modal.')
+  }
+
+  await window.evaluate(async () => {
+    const bridge = globalThis.__spriteSheetSmoke
+    if (!bridge) {
+      throw new Error('Smoke bridge is unavailable before sequence export.')
+    }
+    await bridge.exportSequence()
+  })
+
+  await waitFor(async () => {
+    const entries = await fs.readdir(outputDirectory)
+    return entries.filter((entry) => entry.endsWith('.png')).length === 16 ? true : null
+  })
+
+  const exportToast = window.locator('.export-toast')
+  await exportToast.waitFor({ state: 'visible' })
+  await waitFor(async () => {
+    const text = await exportToast.innerText()
+    return text.includes('单帧导出完成') ? true : null
+  })
+  await exportToast.getByRole('button', { name: '完成' }).click()
+  await exportToast.waitFor({ state: 'hidden' })
 
   await window.evaluate(async (inputPath) => {
     const bridge = globalThis.__spriteSheetSmoke
@@ -198,9 +267,22 @@ try {
     return snapshot?.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 11 ? snapshot : null
   })
 
+  await app.close()
+  app = await launchApp()
+  window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.locator('button[title="设置"]').click()
+  await window.locator('.settings-modal-card').waitFor({ state: 'visible' })
+
+  const persistedDelay = await window.locator('.settings-modal-card input[type="number"]').inputValue()
+  const persistedFixedMode = await window.locator('.settings-modal-card select').inputValue()
+  if (persistedDelay !== '420' || persistedFixedMode !== 'both') {
+    throw new Error('Persisted UI preferences did not survive relaunch.')
+  }
+
   console.log(
-    `Electron regression passed: auto-detect ${autoDetectSnapshot.sheet.rows}x${autoDetectSnapshot.sheet.columns}, GIF roundtrip ${finalSnapshot.frameCount} frames @ ${finalSnapshot.playback.fps} FPS.`
+    `Electron regression passed: auto-detect ${autoDetectSnapshot.sheet.rows}x${autoDetectSnapshot.sheet.columns}, drawer/settings/export regressions, GIF roundtrip ${finalSnapshot.frameCount} frames @ ${finalSnapshot.playback.fps} FPS.`
   )
 } finally {
-  await app.close()
+  await app.close().catch(() => {})
 }

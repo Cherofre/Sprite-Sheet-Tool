@@ -4,7 +4,7 @@ import { stripExtension } from '@lib/fs/fileNames'
 import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
 import { runImageWorkerTask, supportsImageWorker } from '@lib/image/worker.client'
 
-import type { ComposeSheetWorkerResult, ImageInspectionResult } from './imageWorkerTypes'
+import type { ComposeSheetWorkerResult, EncodedFrameBatchResult, ImageInspectionResult } from './imageWorkerTypes'
 
 const MIME_BY_FORMAT: Record<ExportImageFormat, string> = {
   jpeg: 'image/jpeg',
@@ -162,6 +162,61 @@ export const frameToBytes = async (frame: FrameItem, format: ExportImageFormat):
   context.clearRect(0, 0, canvas.width, canvas.height)
   context.drawImage(image, 0, 0, canvas.width, canvas.height)
   return canvasToBytes(canvas, format)
+}
+
+const encodeFramesToBytesInRenderer = async (
+  frames: FrameItem[],
+  format: ExportImageFormat,
+  onProgress?: ProgressCallback
+): Promise<Uint8Array[]> => {
+  const encodedFrames: Uint8Array[] = []
+
+  for (let index = 0; index < frames.length; index += 1) {
+    encodedFrames.push(await frameToBytes(frames[index], format))
+
+    const processed = index + 1
+    if (onProgress && shouldReportProgress(processed, frames.length)) {
+      await onProgress({
+        current: processed,
+        percent: (processed / frames.length) * 100,
+        stage: 'encode-frames',
+        total: frames.length
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
+  }
+
+  return encodedFrames
+}
+
+export const encodeFramesToBytesBatch = async (
+  frames: FrameItem[],
+  format: ExportImageFormat,
+  onProgress?: ProgressCallback
+): Promise<Uint8Array[]> => {
+  if (frames.length === 0) {
+    return []
+  }
+
+  if (supportsImageWorker()) {
+    try {
+      const workerResult = await runImageWorkerTask<EncodedFrameBatchResult>(
+        {
+          format,
+          frames,
+          kind: 'encode-frames'
+        },
+        onProgress
+      )
+
+      return workerResult.encodedFrames
+    } catch {
+      // Fall through to the renderer path when workers are unavailable or fail.
+    }
+  }
+
+  return encodeFramesToBytesInRenderer(frames, format, onProgress)
 }
 
 export const filePayloadToFrame = async (

@@ -29,7 +29,7 @@ export function SettingsPanel({ isOpen, onClose, onUpdate, preferences }: Settin
   }
 
   return createPortal(
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay">
       <div
         className="modal-card settings-modal-card"
         onClick={(event) => {
@@ -75,11 +75,11 @@ export function SettingsPanel({ isOpen, onClose, onUpdate, preferences }: Settin
         <div className="hint-card">
           <span className="eyebrow">说明</span>
           <p>
-            1. 固定模式会让侧栏常驻并为预览区让出空间。
+            1. 固定模式会让侧栏常驻，并为预览区让出空间。
             <br />
             2. 抽屉上的锁定按钮是临时锁定，不会覆盖这里的固定模式。
             <br />
-            3. 这些设置会自动保存在当前机器上。
+            3. 这些设置会自动保存在当前机器上；设置窗口只会通过右上关闭按钮或 `Esc` 关闭。
           </p>
         </div>
       </div>

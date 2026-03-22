@@ -1,4 +1,4 @@
-import type { FrameItem, ImportedFilePayload, RotationStep, TaskProgress } from '@shared/types'
+import type { ExportImageFormat, FrameItem, ImportedFilePayload, RotationStep, TaskProgress } from '@shared/types'
 
 export interface ComposeSheetWorkerResult {
   cellHeight: number
@@ -9,6 +9,10 @@ export interface ComposeSheetWorkerResult {
 export interface DecodeGifWorkerResult {
   averageDelayMs: number
   frames: FrameItem[]
+}
+
+export interface EncodedFrameBatchResult {
+  encodedFrames: Uint8Array[]
 }
 
 export interface ImageInspectionResult {
@@ -57,6 +61,12 @@ export type ImageWorkerRequest =
       kind: 'encode-gif'
     }
   | {
+      format: ExportImageFormat
+      frames: FrameItem[]
+      id: string
+      kind: 'encode-frames'
+    }
+  | {
       id: string
       kind: 'inspect-image'
       maxSampleSize?: number
@@ -82,6 +92,12 @@ export type ImageWorkerResponse =
     }
   | {
       id: string
-      result: ComposeSheetWorkerResult | DecodeGifWorkerResult | FrameItem[] | ImageInspectionResult | Uint8Array
+      result:
+        | ComposeSheetWorkerResult
+        | DecodeGifWorkerResult
+        | EncodedFrameBatchResult
+        | FrameItem[]
+        | ImageInspectionResult
+        | Uint8Array
       type: 'result'
     }

@@ -7,7 +7,7 @@ import { buildExportFileName, buildExportSequence } from '@features/export/plans
 import { buildImportSession } from '@features/import/importSession'
 import { normalizeSheetLayout, recommendSheetLayout } from '@features/merge/layout'
 import { advanceSequencePosition, buildFrameSequence } from '@features/preview/frameSequence'
-import { canvasToBytes, composeSpriteSheet, frameToBytes, rotateFrames, splitSheetToFrames } from '@lib/image/browser'
+import { canvasToBytes, composeSpriteSheet, encodeFramesToBytesBatch, rotateFrames, splitSheetToFrames } from '@lib/image/browser'
 import { encodeGif } from '@lib/image/gif'
 
 import { ExportPanel } from './components/ExportPanel'
@@ -20,9 +20,11 @@ import { SheetPanel } from './components/SheetPanel'
 import { useCanRedo, useCanUndo, useEditorStore } from './store/editorStore'
 
 const OPERATION_CANCELLED = '__OPERATION_CANCELLED__'
+const DRAWER_OPEN_DELAY_MS = 150
+const EXPORT_ENCODE_BATCH_SIZE = 8
 const UI_PREFERENCES_KEY = 'sprite-sheet-tool.ui-preferences.v1'
 const DEFAULT_UI_PREFERENCES: UiPreferences = {
-  drawerBlurDelayMs: 180,
+  drawerBlurDelayMs: 400,
   drawerFixedMode: 'none'
 }
 
@@ -204,6 +206,41 @@ const buildProgressState = (progress: TaskProgress): OperationProgressState => {
 const isCancelledError = (error: unknown): boolean =>
   error instanceof Error && error.message === OPERATION_CANCELLED
 
+const clampFps = (value: number): number => Math.max(1, Math.min(60, Math.round(value)))
+
+const getExportOperationTitle = (stage: 'export-sequence' | 'export-split-sequence'): string =>
+  stage === 'export-sequence' ? '正在导出图片' : '正在导出拆分结果'
+
+const toggleFixedMode = (currentMode: UiPreferences['drawerFixedMode'], side: 'left' | 'right'): UiPreferences['drawerFixedMode'] => {
+  if (side === 'left') {
+    switch (currentMode) {
+      case 'none':
+        return 'left'
+      case 'left':
+        return 'none'
+      case 'right':
+        return 'both'
+      case 'both':
+        return 'right'
+      default:
+        return currentMode
+    }
+  }
+
+  switch (currentMode) {
+    case 'none':
+      return 'right'
+    case 'right':
+      return 'none'
+    case 'left':
+      return 'both'
+    case 'both':
+      return 'left'
+    default:
+      return currentMode
+  }
+}
+
 const loadUiPreferences = (): UiPreferences => {
   if (typeof window === 'undefined') {
     return DEFAULT_UI_PREFERENCES
@@ -274,6 +311,7 @@ export default function App() {
   const operationRef = useRef<OperationController | null>(null)
   const smokeFnsRef = useRef<SmokeBridge | null>(null)
   const drawerCloseTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
+  const drawerOpenTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
   const windowDragDepthRef = useRef(0)
 
   const clearWindowDragState = useEffectEvent(() => {
@@ -311,8 +349,14 @@ export default function App() {
 
   useEffect(() => {
     const drawerCloseTimers = drawerCloseTimersRef.current
+    const drawerOpenTimers = drawerOpenTimersRef.current
     return () => {
       for (const timer of Object.values(drawerCloseTimers)) {
+        if (timer !== null) {
+          window.clearTimeout(timer)
+        }
+      }
+      for (const timer of Object.values(drawerOpenTimers)) {
         if (timer !== null) {
           window.clearTimeout(timer)
         }
@@ -334,9 +378,32 @@ export default function App() {
     }
   }
 
+  const clearDrawerOpenTimer = (side: 'left' | 'right'): void => {
+    const timer = drawerOpenTimersRef.current[side]
+    if (timer !== null) {
+      window.clearTimeout(timer)
+      drawerOpenTimersRef.current[side] = null
+    }
+  }
+
   const openDrawer = useEffectEvent((side: 'left' | 'right') => {
+    clearDrawerOpenTimer(side)
     clearDrawerCloseTimer(side)
     setDrawerOpen((state) => ({ ...state, [side]: true }))
+  })
+
+  const scheduleDrawerOpen = useEffectEvent((side: 'left' | 'right') => {
+    if (isDrawerVisible(side)) {
+      openDrawer(side)
+      return
+    }
+
+    clearDrawerCloseTimer(side)
+    clearDrawerOpenTimer(side)
+    drawerOpenTimersRef.current[side] = window.setTimeout(() => {
+      setDrawerOpen((state) => ({ ...state, [side]: true }))
+      drawerOpenTimersRef.current[side] = null
+    }, DRAWER_OPEN_DELAY_MS)
   })
 
   const scheduleDrawerClose = useEffectEvent((side: 'left' | 'right') => {
@@ -344,6 +411,7 @@ export default function App() {
       return
     }
 
+    clearDrawerOpenTimer(side)
     clearDrawerCloseTimer(side)
     drawerCloseTimersRef.current[side] = window.setTimeout(() => {
       setDrawerOpen((state) => ({ ...state, [side]: false }))
@@ -356,12 +424,24 @@ export default function App() {
       return
     }
 
+    clearDrawerOpenTimer(side)
     clearDrawerCloseTimer(side)
     setDrawerLocks((state) => {
       const nextLocked = !state[side]
       setDrawerOpen((openState) => ({ ...openState, [side]: nextLocked || openState[side] }))
       return { ...state, [side]: nextLocked }
     })
+  })
+
+  const toggleDrawerFixed = useEffectEvent((side: 'left' | 'right') => {
+    clearDrawerOpenTimer(side)
+    clearDrawerCloseTimer(side)
+    setDrawerOpen((state) => ({ ...state, [side]: true }))
+    setDrawerLocks((state) => ({ ...state, [side]: false }))
+    setUiPreferences((state) => ({
+      ...state,
+      drawerFixedMode: toggleFixedMode(state.drawerFixedMode, side)
+    }))
   })
 
   const updateUiPreferences = (patch: Partial<UiPreferences>): void => {
@@ -497,26 +577,56 @@ export default function App() {
     controller: OperationController,
     writtenPaths: string[] = []
   ): Promise<void> => {
-    for (let index = 0; index < framesToWrite.length; index += 1) {
-      ensureOperationActive(controller)
-      const frame = framesToWrite[index]
-      const bytes = await frameToBytes(frame, exportSettings.imageFormat)
+    if (framesToWrite.length === 0) {
+      return
+    }
+
+    const totalFrames = framesToWrite.length
+    const totalUnits = totalFrames * 2
+    const operationTitle = getExportOperationTitle(stage)
+
+    for (let batchStart = 0; batchStart < totalFrames; batchStart += EXPORT_ENCODE_BATCH_SIZE) {
       ensureOperationActive(controller)
 
-      const fileName = buildExportFileName(exportSettings.fileNamePrefix, index, exportSettings.padding, exportSettings.imageFormat)
-      const filePath = joinPath(directory, fileName)
-      await window.desktopApi.writeBinaryFile({
-        data: Array.from(bytes),
-        filePath
-      })
-      writtenPaths.push(filePath)
+      const frameBatch = framesToWrite.slice(batchStart, batchStart + EXPORT_ENCODE_BATCH_SIZE)
+      const encodedBatch = await encodeFramesToBytesBatch(frameBatch, exportSettings.imageFormat, async (progress) => {
+        const encodedWithinBatch =
+          typeof progress.current === 'number'
+            ? progress.current
+            : typeof progress.percent === 'number'
+              ? (Math.max(0, progress.percent) / 100) * frameBatch.length
+              : 0
+        const safeEncodedWithinBatch = Math.max(0, Math.min(frameBatch.length, encodedWithinBatch))
+        const previewCount = Math.min(totalFrames, batchStart + Math.max(1, Math.ceil(safeEncodedWithinBatch)))
 
-      await updateOperationProgress(controller, {
-        current: index + 1,
-        percent: ((index + 1) / framesToWrite.length) * 100,
-        stage,
-        total: framesToWrite.length
+        await updateOperationProgress(controller, {
+          cancellable: true,
+          detail: `正在编码图片 (${previewCount}/${totalFrames})`,
+          percent: ((batchStart * 2 + safeEncodedWithinBatch) / totalUnits) * 100,
+          title: operationTitle
+        })
       })
+
+      ensureOperationActive(controller)
+
+      for (let batchIndex = 0; batchIndex < encodedBatch.length; batchIndex += 1) {
+        const index = batchStart + batchIndex
+        const fileName = buildExportFileName(exportSettings.fileNamePrefix, index, exportSettings.padding, exportSettings.imageFormat)
+        const filePath = joinPath(directory, fileName)
+
+        await window.desktopApi.writeBinaryFile({
+          data: Array.from(encodedBatch[batchIndex]),
+          filePath
+        })
+        writtenPaths.push(filePath)
+
+        await updateOperationProgress(controller, {
+          cancellable: true,
+          detail: `正在写入文件 (${index + 1}/${totalFrames})`,
+          percent: ((batchStart * 2 + frameBatch.length + batchIndex + 1) / totalUnits) * 100,
+          title: operationTitle
+        })
+      }
     }
   }
 
@@ -1321,7 +1431,7 @@ export default function App() {
               }
             }}
             onFocusCapture={() => openDrawer('left')}
-            onMouseEnter={() => openDrawer('left')}
+            onMouseEnter={() => scheduleDrawerOpen('left')}
             onMouseLeave={() => scheduleDrawerClose('left')}
             style={!sheet.source ? { display: 'none' } : undefined}
           >
@@ -1329,13 +1439,12 @@ export default function App() {
               <div className="drawer-topbar">
                 <span className="drawer-title">图集识别</span>
                 <button
-                  className={isDrawerPinned('left') ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
-                  disabled={isDrawerFixed('left')}
-                  onClick={() => toggleDrawerLock('left')}
-                  title={isDrawerFixed('left') ? '已在设置中固定' : isDrawerPinned('left') ? '取消临时锁定' : '临时锁定左侧抽屉'}
+                  className={isDrawerFixed('left') ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
+                  onClick={() => toggleDrawerFixed('left')}
+                  title={isDrawerFixed('left') ? '取消固定左侧区域' : '固定左侧区域'}
                   type="button"
                 >
-                  {isDrawerPinned('left') ? '已锁定' : '锁定'}
+                  {isDrawerFixed('left') ? '已固定' : '固定'}
                 </button>
               </div>
               <SheetPanel
@@ -1359,10 +1468,16 @@ export default function App() {
               />
             </div>
             <div className="drawer-handle drawer-handle-left">
-              <span className="handle-text">
-                图集识别
-                <span className="handle-icon handle-icon-left">»</span>
-              </span>
+              <button
+                className={drawerLocks.left ? 'handle-lock-button active' : 'handle-lock-button'}
+                onClick={() => toggleDrawerLock('left')}
+                title={drawerLocks.left ? '取消临时锁定左侧抽屉' : '临时锁定左侧抽屉'}
+                type="button"
+              >
+                锁
+              </button>
+              <span className="handle-text">图集识别</span>
+              <span className="handle-icon handle-icon-left">»</span>
             </div>
           </aside>
 
@@ -1451,11 +1566,6 @@ export default function App() {
                     >
                       重置
                     </button>
-                    {currentFrame ? (
-                      <span className="compact-info" title={`${currentFrame.name} (${currentFrame.width}x${currentFrame.height})`}>
-                        {currentFrame.name} | {currentFrame.width}x{currentFrame.height}
-                      </span>
-                    ) : null}
                   </div>
 
                   <div className="vt-center">
@@ -1474,21 +1584,38 @@ export default function App() {
                       onWheel={(event) => {
                         event.preventDefault()
                         const step = event.deltaY < 0 ? 1 : -1
-                        updatePlaybackSettings({ fps: Math.max(1, Math.min(60, playback.fps + step)) })
+                        updatePlaybackSettings({ fps: clampFps(playback.fps + step) })
                       }}
                     >
                       <span>FPS: {playback.fps}</span>
                       <input
                         max={60}
                         min={1}
-                        onChange={(event) => updatePlaybackSettings({ fps: Number(event.target.value) })}
+                        onChange={(event) => updatePlaybackSettings({ fps: clampFps(Number(event.target.value)) })}
                         type="range"
+                        value={playback.fps}
+                      />
+                      <input
+                        aria-label="FPS 数值"
+                        className="number-input fps-number-input"
+                        max={60}
+                        min={1}
+                        onChange={(event) => updatePlaybackSettings({ fps: clampFps(Number(event.target.value || playback.fps)) })}
+                        type="number"
                         value={playback.fps}
                       />
                     </div>
                   </div>
 
                   <div className="vt-right">
+                    {currentFrame ? (
+                      <>
+                        <span className="compact-file-name" title={currentFrame.name}>
+                          {currentFrame.name}
+                        </span>
+                        <span className="compact-file-resolution">{currentFrame.width}x{currentFrame.height}</span>
+                      </>
+                    ) : null}
                     <span className="compact-counter">{frames.length === 0 ? '0/0' : `${playback.currentFrame + 1}/${frames.length}`}</span>
                   </div>
                 </div>
@@ -1511,27 +1638,32 @@ export default function App() {
               }
             }}
             onFocusCapture={() => openDrawer('right')}
-            onMouseEnter={() => openDrawer('right')}
+            onMouseEnter={() => scheduleDrawerOpen('right')}
             onMouseLeave={() => scheduleDrawerClose('right')}
             style={frames.length === 0 && !sheet.source ? { display: 'none' } : undefined}
           >
             <div className="drawer-handle drawer-handle-right">
-              <span className="handle-text">
-                <span className="handle-icon handle-icon-right">«</span>
-                编辑与导出
-              </span>
+              <button
+                className={drawerLocks.right ? 'handle-lock-button active' : 'handle-lock-button'}
+                onClick={() => toggleDrawerLock('right')}
+                title={drawerLocks.right ? '取消临时锁定右侧抽屉' : '临时锁定右侧抽屉'}
+                type="button"
+              >
+                锁
+              </button>
+              <span className="handle-text">编辑与导出</span>
+              <span className="handle-icon handle-icon-right">«</span>
             </div>
             <div className="drawer-content">
               <div className="drawer-topbar">
                 <span className="drawer-title">编辑与导出</span>
                 <button
-                  className={isDrawerPinned('right') ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
-                  disabled={isDrawerFixed('right')}
-                  onClick={() => toggleDrawerLock('right')}
-                  title={isDrawerFixed('right') ? '已在设置中固定' : isDrawerPinned('right') ? '取消临时锁定' : '临时锁定右侧抽屉'}
+                  className={isDrawerFixed('right') ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
+                  onClick={() => toggleDrawerFixed('right')}
+                  title={isDrawerFixed('right') ? '取消固定右侧区域' : '固定右侧区域'}
                   type="button"
                 >
-                  {isDrawerPinned('right') ? '已锁定' : '锁定'}
+                  {isDrawerFixed('right') ? '已固定' : '固定'}
                 </button>
               </div>
               <ImportPanel
