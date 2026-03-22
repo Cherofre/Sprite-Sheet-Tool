@@ -36,6 +36,7 @@ interface EditorState extends EditorSnapshot {
   resetWorkspace: () => void
   reverseFrames: () => void
   selectFrame: (frameId: string, toggle?: boolean, range?: boolean) => void
+  setSelectedFrames: (frameIds: string[], lastSelectedFrameId?: string | null) => void
   setBusy: (value: boolean) => void
   setCurrentFrame: (index: number) => void
   setErrorMessage: (message: string | null) => void
@@ -400,6 +401,28 @@ export const useEditorStore = create<EditorState>((set) => ({
         playback: {
           ...state.playback,
           currentFrame: clickedIndex
+        },
+        selectedFrameIds
+      }
+    }),
+
+  setSelectedFrames: (frameIds, lastSelectedFrameId = null) =>
+    set((state) => {
+      const selectedFrameIds = uniqueFrameIds(frameIds).filter((frameId) => state.frames.some((frame) => frame.id === frameId))
+      const currentFrameId = state.frames[state.playback.currentFrame]?.id
+      const fallbackFrameId = selectedFrameIds[0]
+      const nextCurrentFrame =
+        selectedFrameIds.length === 0
+          ? state.playback.currentFrame
+          : currentFrameId && selectedFrameIds.includes(currentFrameId)
+            ? state.playback.currentFrame
+            : Math.max(0, state.frames.findIndex((frame) => frame.id === fallbackFrameId))
+
+      return {
+        lastSelectedFrameId: lastSelectedFrameId ?? selectedFrameIds.at(-1) ?? null,
+        playback: {
+          ...state.playback,
+          currentFrame: nextCurrentFrame
         },
         selectedFrameIds
       }

@@ -832,6 +832,32 @@ label {
   pointer-events: none;
 }
 
+.sheet-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+.sheet-panel-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 1rem;
+}
+
+.sheet-action-bar {
+  flex-shrink: 0;
+  margin-inline: -0.4rem;
+  margin-top: auto;
+  padding: 0.8rem 0.4rem 0.4rem;
+  background: rgba(24, 27, 32, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  z-index: 10;
+  box-shadow: 0 -8px 16px rgba(0, 0, 0, 0.2);
+}
+
 .split-sample-grid {
   display: grid;
   gap: 0.32rem;
@@ -932,11 +958,22 @@ label {
   gap: 0.65rem;
 }
 
+.timeline-grid-shell {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.55rem 0 0.65rem;
+  user-select: none;
+}
+
+.timeline-grid-shell-selecting {
+  cursor: crosshair;
+}
+
 .timeline-grid {
   display: flex;
   gap: 0.5rem;
-  overflow-x: auto;
-  padding-bottom: 0.35rem;
+  min-height: 72px;
 }
 
 .timeline-card {
@@ -968,6 +1005,15 @@ label {
   height: 100%;
   background: transparent;
   object-fit: contain;
+}
+
+.timeline-marquee {
+  position: absolute;
+  border: 1px solid rgba(255, 138, 77, 0.9);
+  background: rgba(255, 138, 77, 0.18);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 5;
 }
 
 .empty-timeline {

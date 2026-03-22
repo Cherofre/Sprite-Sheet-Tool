@@ -44,11 +44,7 @@ const parsePositiveInteger = (value: string): number | null => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
-const buildDraftGeometry = (
-  sourceWidth: number,
-  sourceHeight: number,
-  draft: SheetDraft
-): SheetGeometryPreview => {
+const buildDraftGeometry = (sourceWidth: number, sourceHeight: number, draft: SheetDraft): SheetGeometryPreview => {
   if (draft.mode === 'cell') {
     const frameWidth = parsePositiveInteger(draft.frameWidth) ?? 0
     const frameHeight = parsePositiveInteger(draft.frameHeight) ?? 0
@@ -88,6 +84,9 @@ const buildDraftGeometry = (
   }
 }
 
+const describeExportSettings = (exportSettings: ExportSettings) =>
+  `当前会复用统一导出设置：${exportSettings.imageFormat.toUpperCase()}，前缀“${exportSettings.fileNamePrefix}”，补零 ${exportSettings.padding} 位，跳帧 ${exportSettings.exportSkip}。`
+
 export function SheetPanel({
   exportSettings,
   isBusy = false,
@@ -118,71 +117,75 @@ export function SheetPanel({
     [draft, sheet.sourceHeight, sheet.sourceWidth]
   )
 
-  const syncDraftToStore = useCallback((recordHistory = false) => {
-    if (!sheet.source) {
-      return
-    }
-
-    if (draft.mode === 'cell') {
-      const frameWidth = parsePositiveInteger(draft.frameWidth)
-      const frameHeight = parsePositiveInteger(draft.frameHeight)
-      if (!frameWidth || !frameHeight) {
+  const syncDraftToStore = useCallback(
+    (recordHistory = false) => {
+      if (!sheet.source) {
         return
       }
 
-      const rows = Math.max(0, Math.floor(sheet.sourceHeight / frameHeight))
-      const columns = Math.max(0, Math.floor(sheet.sourceWidth / frameWidth))
+      if (draft.mode === 'cell') {
+        const nextFrameWidth = parsePositiveInteger(draft.frameWidth)
+        const nextFrameHeight = parsePositiveInteger(draft.frameHeight)
+        if (!nextFrameWidth || !nextFrameHeight) {
+          return
+        }
+
+        const nextRows = Math.max(0, Math.floor(sheet.sourceHeight / nextFrameHeight))
+        const nextColumns = Math.max(0, Math.floor(sheet.sourceWidth / nextFrameWidth))
+        if (
+          sheet.mode === 'cell' &&
+          sheet.rows === nextRows &&
+          sheet.columns === nextColumns &&
+          sheet.frameWidth === nextFrameWidth &&
+          sheet.frameHeight === nextFrameHeight
+        ) {
+          return
+        }
+
+        onUpdateSheet(
+          {
+            columns: nextColumns,
+            frameHeight: nextFrameHeight,
+            frameWidth: nextFrameWidth,
+            mode: 'cell',
+            rows: nextRows
+          },
+          recordHistory
+        )
+        return
+      }
+
+      const nextRows = parsePositiveInteger(draft.rows)
+      const nextColumns = parsePositiveInteger(draft.columns)
+      if (!nextRows || !nextColumns) {
+        return
+      }
+
+      const nextFrameWidth = Math.floor(sheet.sourceWidth / nextColumns)
+      const nextFrameHeight = Math.floor(sheet.sourceHeight / nextRows)
       if (
-        sheet.mode === 'cell' &&
-        sheet.rows === rows &&
-        sheet.columns === columns &&
-        sheet.frameWidth === frameWidth &&
-        sheet.frameHeight === frameHeight
+        sheet.mode === 'grid' &&
+        sheet.rows === nextRows &&
+        sheet.columns === nextColumns &&
+        sheet.frameWidth === nextFrameWidth &&
+        sheet.frameHeight === nextFrameHeight
       ) {
         return
       }
 
       onUpdateSheet(
         {
-          columns,
-          frameHeight,
-          frameWidth,
-          mode: 'cell',
-          rows
+          columns: nextColumns,
+          frameHeight: nextFrameHeight,
+          frameWidth: nextFrameWidth,
+          mode: 'grid',
+          rows: nextRows
         },
         recordHistory
       )
-      return
-    }
-
-    const rows = parsePositiveInteger(draft.rows)
-    const columns = parsePositiveInteger(draft.columns)
-    if (!rows || !columns) {
-      return
-    }
-    const frameWidth = Math.floor(sheet.sourceWidth / columns)
-    const frameHeight = Math.floor(sheet.sourceHeight / rows)
-    if (
-      sheet.mode === 'grid' &&
-      sheet.rows === rows &&
-      sheet.columns === columns &&
-      sheet.frameWidth === frameWidth &&
-      sheet.frameHeight === frameHeight
-    ) {
-      return
-    }
-
-    onUpdateSheet(
-      {
-        columns,
-        frameHeight,
-        frameWidth,
-        mode: 'grid',
-        rows
-      },
-      recordHistory
-    )
-  }, [draft, onUpdateSheet, sheet])
+    },
+    [draft, onUpdateSheet, sheet]
+  )
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -196,189 +199,193 @@ export function SheetPanel({
 
   if (!sheet.source) {
     return (
-      <section className="panel stack">
-        <div className="section-heading">
-          <span className="eyebrow">拆分</span>
-          <h2>图集识别</h2>
+      <section className="panel sheet-panel">
+        <div className="stack sheet-panel-scroll">
+          <div className="section-heading">
+            <span className="eyebrow">拆分</span>
+            <h2>图集识别</h2>
+          </div>
+          <p className="muted-copy">导入单张图后，可以预览规则图集的拆分结果，并手动覆盖行列或帧尺寸。</p>
         </div>
-        <p className="muted-copy">导入单张图后，可以预览规则图集的拆分结果，并手动覆盖行列或帧尺寸。</p>
       </section>
     )
   }
 
   return (
-    <section className="panel stack">
-      <div className="section-heading">
-        <span className="eyebrow">拆分</span>
-        <h2>图集识别</h2>
-      </div>
-
-      <div className="hint-card">
-        <span className="eyebrow">源图</span>
-        <p>
-          {sheet.source.name}
-          <br />
-          {sheet.sourceWidth} x {sheet.sourceHeight}
-        </p>
-      </div>
-
-      <div className="toggle-group">
-        <button
-          className={draft.mode === 'grid' ? 'toggle-button active' : 'toggle-button'}
-          onClick={() => {
-            setDraft((current) => ({ ...current, mode: 'grid' }))
-            onUpdateSheet({ mode: 'grid' }, false)
-          }}
-          type="button"
-        >
-          行列方式
-        </button>
-        <button
-          className={draft.mode === 'cell' ? 'toggle-button active' : 'toggle-button'}
-          onClick={() => {
-            setDraft((current) => ({ ...current, mode: 'cell' }))
-            onUpdateSheet({ mode: 'cell' }, false)
-          }}
-          type="button"
-        >
-          帧尺寸方式
-        </button>
-      </div>
-
-      {draft.mode === 'grid' ? (
-        <div className="form-grid">
-          <label>
-            行
-            <input
-              className="number-input"
-              min={1}
-              onBlur={() => syncDraftToStore(true)}
-              onChange={(event) => setDraft((current) => ({ ...current, rows: event.target.value }))}
-              type="number"
-              value={draft.rows}
-            />
-          </label>
-          <label>
-            列
-            <input
-              className="number-input"
-              min={1}
-              onBlur={() => syncDraftToStore(true)}
-              onChange={(event) => setDraft((current) => ({ ...current, columns: event.target.value }))}
-              type="number"
-              value={draft.columns}
-            />
-          </label>
+    <section className="panel sheet-panel">
+      <div className="stack sheet-panel-scroll">
+        <div className="section-heading">
+          <span className="eyebrow">拆分</span>
+          <h2>图集识别</h2>
         </div>
-      ) : (
-        <div className="form-grid">
-          <label>
-            帧宽
-            <input
-              className="number-input"
-              min={1}
-              onBlur={() => syncDraftToStore(true)}
-              onChange={(event) => setDraft((current) => ({ ...current, frameWidth: event.target.value }))}
-              type="number"
-              value={draft.frameWidth}
-            />
-          </label>
-          <label>
-            帧高
-            <input
-              className="number-input"
-              min={1}
-              onBlur={() => syncDraftToStore(true)}
-              onChange={(event) => setDraft((current) => ({ ...current, frameHeight: event.target.value }))}
-              type="number"
-              value={draft.frameHeight}
-            />
-          </label>
+
+        <div className="hint-card">
+          <span className="eyebrow">源图</span>
+          <p>
+            {sheet.source.name}
+            <br />
+            {sheet.sourceWidth} x {sheet.sourceHeight}
+          </p>
         </div>
-      )}
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span>帧尺寸</span>
-          <strong>
-            {geometry.frameWidth} x {geometry.frameHeight}
-          </strong>
-        </div>
-        <div className="stat-card">
-          <span>预计帧数</span>
-          <strong>{geometry.predictedFrameCount}</strong>
-        </div>
-      </div>
-
-      <SplitPreview
-        canApply={geometry.canApply}
-        columns={geometry.columns}
-        frameHeight={geometry.frameHeight}
-        frameWidth={geometry.frameWidth}
-        predictedFrameCount={geometry.predictedFrameCount}
-        rows={geometry.rows}
-        source={sheet.source}
-      />
-
-      <div className="button-grid">
-        <button
-          className="primary-button"
-          disabled={!geometry.canApply || isBusy}
-          onClick={() => {
-            syncDraftToStore(true)
-            onApply(geometry)
-          }}
-          type="button"
-        >
-          应用到时间轴
-        </button>
-        <button
-          className="secondary-button"
-          disabled={!geometry.canApply || isBusy}
-          onClick={() => {
-            syncDraftToStore(true)
-            onExportSplitSequence(geometry)
-          }}
-          type="button"
-        >
-          导出拆分序列
-        </button>
-      </div>
-
-      <div className="hint-card">
-        <span className="eyebrow">导出设置</span>
-        <p>
-          当前会复用统一导出设置：{exportSettings.imageFormat.toUpperCase()}，前缀“{exportSettings.fileNamePrefix}”，补零 {exportSettings.padding} 位，跳帧 {exportSettings.exportSkip}。
-        </p>
-      </div>
-
-      {sheet.candidates.length > 0 ? (
-        <div className="control-block">
-          <div className="section-heading compact">
-            <span className="eyebrow">自动识别</span>
-            <h3>候选方案</h3>
-          </div>
-          <select
-            defaultValue=""
-            onChange={(event) => {
-              const selected = sheet.candidates.find((candidate) => candidate.label === event.target.value)
-              if (selected) {
-                onChooseCandidate(selected)
-              }
-              event.currentTarget.selectedIndex = 0
+        <div className="toggle-group">
+          <button
+            className={draft.mode === 'grid' ? 'toggle-button active' : 'toggle-button'}
+            onClick={() => {
+              setDraft((current) => ({ ...current, mode: 'grid' }))
+              onUpdateSheet({ mode: 'grid' }, false)
             }}
+            type="button"
           >
-            <option disabled value="">
-              -- 选择其他候选方案 --
-            </option>
-            {sheet.candidates.map((candidate) => (
-              <option key={candidate.label} value={candidate.label}>
-                {candidate.label}（置信度 {(candidate.confidence * 100).toFixed(0)}%）
-              </option>
-            ))}
-          </select>
+            行列方式
+          </button>
+          <button
+            className={draft.mode === 'cell' ? 'toggle-button active' : 'toggle-button'}
+            onClick={() => {
+              setDraft((current) => ({ ...current, mode: 'cell' }))
+              onUpdateSheet({ mode: 'cell' }, false)
+            }}
+            type="button"
+          >
+            帧尺寸方式
+          </button>
         </div>
-      ) : null}
+
+        {draft.mode === 'grid' ? (
+          <div className="form-grid">
+            <label>
+              行
+              <input
+                className="number-input"
+                min={1}
+                onBlur={() => syncDraftToStore(true)}
+                onChange={(event) => setDraft((current) => ({ ...current, rows: event.target.value }))}
+                type="number"
+                value={draft.rows}
+              />
+            </label>
+            <label>
+              列
+              <input
+                className="number-input"
+                min={1}
+                onBlur={() => syncDraftToStore(true)}
+                onChange={(event) => setDraft((current) => ({ ...current, columns: event.target.value }))}
+                type="number"
+                value={draft.columns}
+              />
+            </label>
+          </div>
+        ) : (
+          <div className="form-grid">
+            <label>
+              帧宽
+              <input
+                className="number-input"
+                min={1}
+                onBlur={() => syncDraftToStore(true)}
+                onChange={(event) => setDraft((current) => ({ ...current, frameWidth: event.target.value }))}
+                type="number"
+                value={draft.frameWidth}
+              />
+            </label>
+            <label>
+              帧高
+              <input
+                className="number-input"
+                min={1}
+                onBlur={() => syncDraftToStore(true)}
+                onChange={(event) => setDraft((current) => ({ ...current, frameHeight: event.target.value }))}
+                type="number"
+                value={draft.frameHeight}
+              />
+            </label>
+          </div>
+        )}
+
+        <div className="stats-grid">
+          <div className="stat-card">
+            <span>帧尺寸</span>
+            <strong>
+              {geometry.frameWidth} x {geometry.frameHeight}
+            </strong>
+          </div>
+          <div className="stat-card">
+            <span>预计帧数</span>
+            <strong>{geometry.predictedFrameCount}</strong>
+          </div>
+        </div>
+
+        <SplitPreview
+          canApply={geometry.canApply}
+          columns={geometry.columns}
+          frameHeight={geometry.frameHeight}
+          frameWidth={geometry.frameWidth}
+          predictedFrameCount={geometry.predictedFrameCount}
+          rows={geometry.rows}
+          source={sheet.source}
+        />
+
+        <div className="hint-card">
+          <span className="eyebrow">导出设置</span>
+          <p>{describeExportSettings(exportSettings)}</p>
+        </div>
+
+        {sheet.candidates.length > 0 ? (
+          <div className="control-block">
+            <div className="section-heading compact">
+              <span className="eyebrow">自动识别</span>
+              <h3>候选方案</h3>
+            </div>
+            <select
+              defaultValue=""
+              onChange={(event) => {
+                const selected = sheet.candidates.find((candidate) => candidate.label === event.target.value)
+                if (selected) {
+                  onChooseCandidate(selected)
+                }
+                event.currentTarget.selectedIndex = 0
+              }}
+            >
+              <option disabled value="">
+                -- 选择其他候选方案 --
+              </option>
+              {sheet.candidates.map((candidate) => (
+                <option key={candidate.label} value={candidate.label}>
+                  {candidate.label}（置信度 {(candidate.confidence * 100).toFixed(0)}%）
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="sheet-action-bar">
+        <div className="button-grid">
+          <button
+            className="primary-button"
+            disabled={!geometry.canApply || isBusy}
+            onClick={() => {
+              syncDraftToStore(true)
+              onApply(geometry)
+            }}
+            type="button"
+          >
+            应用到时间轴
+          </button>
+          <button
+            className="secondary-button"
+            disabled={!geometry.canApply || isBusy}
+            onClick={() => {
+              syncDraftToStore(true)
+              onExportSplitSequence(geometry)
+            }}
+            type="button"
+          >
+            导出拆分序列
+          </button>
+        </div>
+      </div>
     </section>
   )
 }
