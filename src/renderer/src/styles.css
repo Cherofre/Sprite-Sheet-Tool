@@ -780,6 +780,26 @@ label {
   text-align: right;
 }
 
+.sheet-apply-notice {
+  border-color: rgba(255, 138, 77, 0.22);
+  background: rgba(255, 138, 77, 0.08);
+}
+
+.sheet-apply-notice .eyebrow {
+  background: rgba(255, 138, 77, 0.14);
+  color: #ffd8c5;
+}
+
+.sheet-apply-notice-invalid {
+  border-color: rgba(255, 208, 118, 0.22);
+  background: rgba(255, 208, 118, 0.08);
+}
+
+.sheet-apply-notice-invalid .eyebrow {
+  background: rgba(255, 208, 118, 0.14);
+  color: #ffe8b3;
+}
+
 .candidate-list,
 .split-preview-stack {
   display: flex;
@@ -985,6 +1005,7 @@ label {
   padding: 0.25rem;
   position: relative;
   overflow: hidden;
+  cursor: default;
 }
 
 .timeline-index {
@@ -998,6 +1019,48 @@ label {
   border-bottom-right-radius: var(--radius-sm);
   pointer-events: none;
   z-index: 2;
+}
+
+.timeline-drag-handle {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.52);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.58rem;
+  line-height: 1;
+  letter-spacing: -1px;
+  cursor: grab;
+  opacity: 0.72;
+  z-index: 3;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.timeline-drag-handle-icon {
+  width: 10px;
+  height: 10px;
+  display: block;
+}
+
+.timeline-card:hover .timeline-drag-handle,
+.timeline-card:focus-visible .timeline-drag-handle {
+  opacity: 1;
+}
+
+.timeline-drag-handle:hover,
+.timeline-drag-handle:focus-visible {
+  background: rgba(255, 138, 77, 0.18);
+  color: #ffe0cf;
+}
+
+.timeline-drag-handle:active {
+  cursor: grabbing;
 }
 
 .timeline-thumb {

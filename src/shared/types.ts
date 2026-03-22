@@ -84,13 +84,18 @@ export interface SaveFileInput {
   title?: string
 }
 
+export interface ChooseDirectoryOptions {
+  defaultPath?: string
+  title?: string
+}
+
 export interface WriteFileInput {
   data: number[]
   filePath: string
 }
 
 export interface DesktopApi {
-  chooseDirectory(title?: string): Promise<string | null>
+  chooseDirectory(options?: ChooseDirectoryOptions): Promise<string | null>
   deletePaths(paths: string[]): Promise<void>
   getPathForDroppedFile(file: File): string
   loadDirectory(dirPath: string): Promise<ImportedFilePayload[]>

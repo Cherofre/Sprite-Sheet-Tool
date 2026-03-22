@@ -4,7 +4,7 @@ import path from 'node:path'
 import { dialog, ipcMain, shell } from 'electron'
 
 import { IMAGE_MIME_BY_EXTENSION, SUPPORTED_EXTENSIONS } from '@shared/constants'
-import type { ImportedFilePayload, SaveFileInput, WriteFileInput } from '@shared/types'
+import type { ChooseDirectoryOptions, ImportedFilePayload, SaveFileInput, WriteFileInput } from '@shared/types'
 
 const toDataUrl = (extension: string, data: Buffer): string => {
   const mimeType = IMAGE_MIME_BY_EXTENSION[extension] ?? 'application/octet-stream'
@@ -194,15 +194,16 @@ export const registerIpcHandlers = (): void => {
     return result.filePath
   })
 
-  ipcMain.handle('directory:choose', async (_event, title?: string) => {
+  ipcMain.handle('directory:choose', async (_event, options?: ChooseDirectoryOptions) => {
     const overriddenDirectory = process.env.SPRITE_SHEET_CHOOSE_DIRECTORY
     if (overriddenDirectory) {
       return overriddenDirectory
     }
 
     const result = await dialog.showOpenDialog({
+      defaultPath: options?.defaultPath,
       properties: ['createDirectory', 'openDirectory'],
-      title: title ?? '选择导出文件夹'
+      title: options?.title ?? '选择导出文件夹'
     })
 
     return result.canceled ? null : (result.filePaths[0] ?? null)

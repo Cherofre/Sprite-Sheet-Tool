@@ -14,6 +14,7 @@ interface SheetGeometryPreview {
 }
 
 interface SheetPanelProps {
+  appliedGeometrySignature: string | null
   canApply: boolean
   columns: number
   exportSettings: ExportSettings
@@ -36,6 +37,8 @@ interface SheetDraft {
   mode: SheetState['mode']
   rows: string
 }
+
+type ApplyState = 'clean' | 'invalid' | 'pending' | 'unapplied'
 
 const DEBOUNCE_MS = 260
 
@@ -87,7 +90,62 @@ const buildDraftGeometry = (sourceWidth: number, sourceHeight: number, draft: Sh
 const describeExportSettings = (exportSettings: ExportSettings) =>
   `当前会复用统一导出设置：${exportSettings.imageFormat.toUpperCase()}，前缀“${exportSettings.fileNamePrefix}”，补零 ${exportSettings.padding} 位，跳帧 ${exportSettings.exportSkip}。`
 
+const buildGeometrySignature = (
+  source: SheetState['source'],
+  geometry: Pick<SheetGeometryPreview, 'canApply' | 'columns' | 'frameHeight' | 'frameWidth' | 'rows'>
+): string | null => {
+  if (!source || !geometry.canApply) {
+    return null
+  }
+
+  return [source.path || source.name, geometry.rows, geometry.columns, geometry.frameWidth, geometry.frameHeight].join('|')
+}
+
+const getApplyState = (
+  source: SheetState['source'],
+  geometry: SheetGeometryPreview,
+  appliedGeometrySignature: string | null
+): ApplyState => {
+  if (!source) {
+    return 'clean'
+  }
+
+  if (!geometry.canApply) {
+    return 'invalid'
+  }
+
+  const currentSignature = buildGeometrySignature(source, geometry)
+  if (!appliedGeometrySignature) {
+    return 'unapplied'
+  }
+
+  return currentSignature === appliedGeometrySignature ? 'clean' : 'pending'
+}
+
+const getApplyNotice = (applyState: ApplyState): { body: string; title: string } | null => {
+  switch (applyState) {
+    case 'invalid':
+      return {
+        body: '当前参数还不能拆分，请检查行列或帧尺寸是否能整除原图。',
+        title: '当前参数不可应用'
+      }
+    case 'pending':
+      return {
+        body: '已修改，未应用到时间轴。',
+        title: '待应用'
+      }
+    case 'unapplied':
+      return {
+        body: '当前网格尚未应用到时间轴。',
+        title: '未应用'
+      }
+    default:
+      return null
+  }
+}
+
 export function SheetPanel({
+  appliedGeometrySignature,
   exportSettings,
   isBusy = false,
   onApply,
@@ -116,6 +174,12 @@ export function SheetPanel({
     () => buildDraftGeometry(sheet.sourceWidth, sheet.sourceHeight, draft),
     [draft, sheet.sourceHeight, sheet.sourceWidth]
   )
+
+  const applyState = useMemo(
+    () => getApplyState(sheet.source, geometry, appliedGeometrySignature),
+    [appliedGeometrySignature, geometry, sheet.source]
+  )
+  const applyNotice = useMemo(() => getApplyNotice(applyState), [applyState])
 
   const syncDraftToStore = useCallback(
     (recordHistory = false) => {
@@ -227,6 +291,13 @@ export function SheetPanel({
             {sheet.sourceWidth} x {sheet.sourceHeight}
           </p>
         </div>
+
+        {applyNotice ? (
+          <div className={`hint-card slim-status sheet-apply-notice sheet-apply-notice-${applyState}`}>
+            <span className="eyebrow">{applyNotice.title}</span>
+            <span>{applyNotice.body}</span>
+          </div>
+        ) : null}
 
         <div className="toggle-group">
           <button

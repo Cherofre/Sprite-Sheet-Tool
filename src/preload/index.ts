@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { DesktopApi } from '@shared/types'
 
 const api: DesktopApi = {
-  chooseDirectory: (title) => ipcRenderer.invoke('directory:choose', title),
+  chooseDirectory: (options) => ipcRenderer.invoke('directory:choose', options),
   deletePaths: (paths) => ipcRenderer.invoke('paths:delete', paths),
   getPathForDroppedFile: (file) => webUtils.getPathForFile(file),
   loadDirectory: (dirPath) => ipcRenderer.invoke('directory:load', dirPath),

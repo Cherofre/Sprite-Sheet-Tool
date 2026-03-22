@@ -2,7 +2,7 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import { closestCenter, DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from 'react'
 
 import type { FrameItem } from '@shared/types'
 
@@ -33,10 +33,17 @@ interface SortableFrameCardProps {
   onMoveFramesToEnd: (frameIds: string[]) => void
   onMoveFramesToStart: (frameIds: string[]) => void
   onSaveFrameAs: (frame: FrameItem) => void
-  onSelectFrame: (event: React.MouseEvent<HTMLButtonElement>, frameId: string) => void
+  onSelectFrame: (event: MouseEvent<HTMLButtonElement>, frameId: string) => void
   registerCard: (frameId: string, node: HTMLButtonElement | null) => void
   selectedFrameIds: string[]
 }
+
+interface PendingMarquee {
+  originX: number
+  originY: number
+}
+
+const MARQUEE_DRAG_THRESHOLD = 6
 
 const getContextTargetIds = (frameId: string, isSelected: boolean, selectedFrameIds: string[]): string[] =>
   isSelected ? selectedFrameIds : [frameId]
@@ -67,7 +74,9 @@ function SortableFrameCard({
   registerCard,
   selectedFrameIds
 }: SortableFrameCardProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: frame.id })
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: frame.id
+  })
   const contextTargetIds = getContextTargetIds(frame.id, isSelected, selectedFrameIds)
   const deleteLabel = contextTargetIds.length > 1 ? '删除选中帧' : '删除当前帧'
 
@@ -75,8 +84,6 @@ function SortableFrameCard({
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
         <button
-          {...attributes}
-          {...listeners}
           className={
             isSelected
               ? currentFrame === index
@@ -101,6 +108,29 @@ function SortableFrameCard({
           type="button"
         >
           <span className="timeline-index">{index + 1}</span>
+          <span
+            {...attributes}
+            {...listeners}
+            aria-label="拖动重排"
+            className="timeline-drag-handle"
+            ref={setActivatorNodeRef}
+            title="拖动重排"
+          >
+            <svg
+              aria-hidden="true"
+              className="timeline-drag-handle-icon"
+              fill="none"
+              viewBox="0 0 12 12"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <circle cx="3" cy="3" fill="currentColor" r="1" />
+              <circle cx="3" cy="6" fill="currentColor" r="1" />
+              <circle cx="3" cy="9" fill="currentColor" r="1" />
+              <circle cx="6" cy="3" fill="currentColor" r="1" />
+              <circle cx="6" cy="6" fill="currentColor" r="1" />
+              <circle cx="6" cy="9" fill="currentColor" r="1" />
+            </svg>
+          </span>
           <img alt={frame.name} className="timeline-thumb" draggable={false} src={frame.dataUrl} />
         </button>
       </ContextMenu.Trigger>
@@ -141,7 +171,7 @@ const frameDataUrlToBytes = async (dataUrl: string): Promise<Uint8Array> => {
 }
 
 export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame, selectedFrameIds }: FrameTimelineProps) {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const deleteFrames = useEditorStore((state) => state.deleteFrames)
   const duplicateFrame = useEditorStore((state) => state.duplicateFrame)
   const moveFramesToEnd = useEditorStore((state) => state.moveFramesToEnd)
@@ -149,11 +179,34 @@ export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame
   const setErrorMessage = useEditorStore((state) => state.setErrorMessage)
   const setSelectedFrames = useEditorStore((state) => state.setSelectedFrames)
   const setStatusMessage = useEditorStore((state) => state.setStatusMessage)
+
   const timelineViewportRef = useRef<HTMLDivElement | null>(null)
   const cardRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const pendingMarqueeRef = useRef<PendingMarquee | null>(null)
   const selectionOriginRef = useRef<{ x: number; y: number } | null>(null)
+  const suppressClickRef = useRef(false)
+  const suppressClickTimerRef = useRef<number | null>(null)
+
   const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null)
   const [isSelecting, setIsSelecting] = useState(false)
+
+  const clearSuppressClickFlag = useCallback(() => {
+    if (suppressClickTimerRef.current !== null) {
+      window.clearTimeout(suppressClickTimerRef.current)
+    }
+    suppressClickTimerRef.current = window.setTimeout(() => {
+      suppressClickRef.current = false
+      suppressClickTimerRef.current = null
+    }, 0)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (suppressClickTimerRef.current !== null) {
+        window.clearTimeout(suppressClickTimerRef.current)
+      }
+    }
+  }, [])
 
   const registerCard = (frameId: string, node: HTMLButtonElement | null) => {
     cardRefs.current[frameId] = node
@@ -198,28 +251,57 @@ export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame
   )
 
   useEffect(() => {
-    if (!isSelecting) {
-      return undefined
-    }
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      const pending = pendingMarqueeRef.current
+      if (!pending) {
+        return
+      }
 
-    const handlePointerMove = (event: PointerEvent) => {
+      if (!isSelecting) {
+        const deltaX = Math.abs(event.clientX - pending.originX)
+        const deltaY = Math.abs(event.clientY - pending.originY)
+        if (deltaX < MARQUEE_DRAG_THRESHOLD && deltaY < MARQUEE_DRAG_THRESHOLD) {
+          return
+        }
+
+        const container = timelineViewportRef.current
+        if (!container) {
+          return
+        }
+
+        const rect = container.getBoundingClientRect()
+        selectionOriginRef.current = {
+          x: pending.originX - rect.left + container.scrollLeft,
+          y: pending.originY - rect.top + container.scrollTop
+        }
+        setIsSelecting(true)
+        setSelectedFrames([])
+      }
+
       updateSelectionFromPointer(event.clientX, event.clientY)
     }
 
     const handlePointerUp = () => {
-      setIsSelecting(false)
+      pendingMarqueeRef.current = null
       selectionOriginRef.current = null
+
+      if (isSelecting) {
+        suppressClickRef.current = true
+        clearSuppressClickFlag()
+      }
+
+      setIsSelecting(false)
       setMarqueeRect(null)
     }
 
     window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp, { once: true })
+    window.addEventListener('pointerup', handlePointerUp)
 
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [isSelecting, updateSelectionFromPointer])
+  }, [clearSuppressClickFlag, isSelecting, setSelectedFrames, updateSelectionFromPointer])
 
   const handleDragEnd = (event: DragEndEvent) => {
     if (!event.over || event.active.id === event.over.id) {
@@ -229,31 +311,24 @@ export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame
     onMoveFrame(String(event.active.id), String(event.over.id))
   }
 
-  const handleTimelinePointerDown: React.PointerEventHandler<HTMLDivElement> = (event) => {
+  const handleTimelinePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return
     }
 
-    if ((event.target as HTMLElement | null)?.closest('.timeline-card')) {
+    const target = event.target as HTMLElement | null
+    if (target?.closest('.timeline-drag-handle')) {
+      pendingMarqueeRef.current = null
       return
     }
 
-    const container = timelineViewportRef.current
-    if (!container) {
-      return
+    pendingMarqueeRef.current = {
+      originX: event.clientX,
+      originY: event.clientY
     }
-
-    const rect = container.getBoundingClientRect()
-    selectionOriginRef.current = {
-      x: event.clientX - rect.left + container.scrollLeft,
-      y: event.clientY - rect.top + container.scrollTop
-    }
-    setIsSelecting(true)
-    setSelectedFrames([])
-    updateSelectionFromPointer(event.clientX, event.clientY)
   }
 
-  const handleTimelineWheel: React.WheelEventHandler<HTMLDivElement> = (event) => {
+  const handleTimelineWheel = (event: WheelEvent<HTMLDivElement>) => {
     const container = timelineViewportRef.current
     if (!container) {
       return
@@ -286,6 +361,16 @@ export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame
       const message = error instanceof Error ? error.message : '保存单帧失败。'
       setErrorMessage(message)
     }
+  }
+
+  const handleCardClick = (event: MouseEvent<HTMLButtonElement>, frameId: string) => {
+    if (suppressClickRef.current) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+
+    onSelectFrame(frameId, event.metaKey || event.ctrlKey, event.shiftKey)
   }
 
   return (
@@ -321,7 +406,7 @@ export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame
                     onSaveFrameAs={(selectedFrame) => {
                       void handleSaveFrameAs(selectedFrame)
                     }}
-                    onSelectFrame={(event, frameId) => onSelectFrame(frameId, event.metaKey || event.ctrlKey, event.shiftKey)}
+                    onSelectFrame={handleCardClick}
                     registerCard={registerCard}
                     selectedFrameIds={selectedFrameIds}
                   />

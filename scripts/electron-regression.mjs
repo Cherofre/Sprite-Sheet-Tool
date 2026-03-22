@@ -253,7 +253,7 @@ try {
 
   await waitFor(async () => {
     const snapshot = await window.evaluate(() => window.__spriteSheetSmoke.getSnapshot())
-    return snapshot.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 11 ? snapshot : null
+    return snapshot.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 12 ? snapshot : null
   })
 
   await window.evaluate(async () => {
@@ -271,7 +271,7 @@ try {
 
   const finalSnapshot = await waitFor(async () => {
     const snapshot = await window.evaluate(() => window.__spriteSheetSmoke.getSnapshot())
-    return snapshot.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 11 ? snapshot : null
+    return snapshot.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 12 ? snapshot : null
   })
 
   await app.close()

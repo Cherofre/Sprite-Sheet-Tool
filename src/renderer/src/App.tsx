@@ -1,7 +1,7 @@
 ﻿import { startTransition, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 
-import { SUPPORTED_EXTENSIONS } from '@shared/constants'
-import type { FrameItem, GridCandidate, ImportedFilePayload, SheetState, TaskProgress } from '@shared/types'
+import { DEFAULT_EXPORT, DEFAULT_PLAYBACK, SUPPORTED_EXTENSIONS } from '@shared/constants'
+import type { ExportSettings, FrameItem, GridCandidate, ImportedFilePayload, PlaybackSettings, SheetState, TaskProgress } from '@shared/types'
 
 import { buildExportFileName, buildExportSequence } from '@features/export/plans'
 import { buildImportSession } from '@features/import/importSession'
@@ -23,6 +23,8 @@ const OPERATION_CANCELLED = '__OPERATION_CANCELLED__'
 const DRAWER_OPEN_DELAY_MS = 150
 const EXPORT_ENCODE_BATCH_SIZE = 8
 const UI_PREFERENCES_KEY = 'sprite-sheet-tool.ui-preferences.v1'
+const PLAYBACK_PREFERENCES_KEY = 'sprite-sheet-tool.playback-preferences.v1'
+const EXPORT_PREFERENCES_KEY = 'sprite-sheet-tool.export-preferences.v1'
 const DEFAULT_UI_PREFERENCES: UiPreferences = {
   drawerBlurDelayMs: 400,
   drawerFixedMode: 'none'
@@ -62,6 +64,13 @@ interface ExportNotice {
   targetPath: string
 }
 
+interface PersistedExportPreferences {
+  exportSettings: ExportSettings
+  lastDirectory: string | null
+}
+
+type PersistedPlaybackPreferences = Pick<PlaybackSettings, 'background' | 'fps' | 'loopMode' | 'previewSkip' | 'reverse' | 'zoom'>
+
 interface SheetGeometryState {
   canApply: boolean
   columns: number
@@ -92,14 +101,19 @@ interface SmokeBridge {
 }
 
 const shortcutRows = [
+  ['F1', '打开快捷键说明'],
   ['Space', '播放 / 暂停'],
-  ['Left / Right', '上一帧 / 下一帧'],
+  ['Shift + F', '视图重置到适应'],
+  ['D / F / ← / → / ↑ / ↓', '上一帧 / 下一帧'],
+  ['Home / End', '跳到首帧 / 末帧'],
   ['Delete / Backspace', '删除选中帧'],
+  ['Ctrl/Cmd + A', '全选时间轴帧'],
   ['Ctrl/Cmd + Z', '撤销'],
   ['Ctrl/Cmd + Shift + Z', '重做'],
-  ['Ctrl/Cmd + Y', '重做'],
   ['Ctrl/Cmd + O', '导入文件'],
   ['Ctrl/Cmd + Shift + O', '导入文件夹'],
+  ['Ctrl/Cmd + E', '打开导出设置'],
+  ['Ctrl/Cmd + ,', '打开设置'],
   ['Esc', '关闭说明或取消当前任务']
 ] as const
 
@@ -267,6 +281,23 @@ const toggleFixedMode = (currentMode: UiPreferences['drawerFixedMode'], side: 'l
   }
 }
 
+const buildSheetGeometrySignature = (
+  source: SheetState['source'],
+  geometry: Pick<SheetGeometryState, 'canApply' | 'columns' | 'frameHeight' | 'frameWidth' | 'rows'>
+): string | null => {
+  if (!source || !geometry.canApply) {
+    return null
+  }
+
+  return [
+    source.path || source.name,
+    geometry.rows,
+    geometry.columns,
+    geometry.frameWidth,
+    geometry.frameHeight
+  ].join('|')
+}
+
 const loadUiPreferences = (): UiPreferences => {
   if (typeof window === 'undefined') {
     return DEFAULT_UI_PREFERENCES
@@ -292,6 +323,127 @@ const loadUiPreferences = (): UiPreferences => {
   }
 }
 
+const clampPersistedZoom = (value: unknown): number | 'fit' => {
+  if (value === 'fit') {
+    return 'fit'
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(10, Math.min(800, Math.round(value)))
+  }
+
+  return DEFAULT_PLAYBACK.zoom
+}
+
+const loadPlaybackPreferences = (): PersistedPlaybackPreferences => {
+  if (typeof window === 'undefined') {
+    return {
+      background: DEFAULT_PLAYBACK.background,
+      fps: DEFAULT_PLAYBACK.fps,
+      loopMode: DEFAULT_PLAYBACK.loopMode,
+      previewSkip: DEFAULT_PLAYBACK.previewSkip,
+      reverse: DEFAULT_PLAYBACK.reverse,
+      zoom: DEFAULT_PLAYBACK.zoom
+    }
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(PLAYBACK_PREFERENCES_KEY)
+    if (!rawValue) {
+      return {
+        background: DEFAULT_PLAYBACK.background,
+        fps: DEFAULT_PLAYBACK.fps,
+        loopMode: DEFAULT_PLAYBACK.loopMode,
+        previewSkip: DEFAULT_PLAYBACK.previewSkip,
+        reverse: DEFAULT_PLAYBACK.reverse,
+        zoom: DEFAULT_PLAYBACK.zoom
+      }
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<PersistedPlaybackPreferences>
+    return {
+      background: parsed.background === 'black' || parsed.background === 'white' ? parsed.background : DEFAULT_PLAYBACK.background,
+      fps: typeof parsed.fps === 'number' ? clampFps(parsed.fps) : DEFAULT_PLAYBACK.fps,
+      loopMode:
+        parsed.loopMode === 'once' || parsed.loopMode === 'pingpong' ? parsed.loopMode : DEFAULT_PLAYBACK.loopMode,
+      previewSkip:
+        typeof parsed.previewSkip === 'number' ? Math.max(0, Math.min(99, Math.round(parsed.previewSkip))) : DEFAULT_PLAYBACK.previewSkip,
+      reverse: typeof parsed.reverse === 'boolean' ? parsed.reverse : DEFAULT_PLAYBACK.reverse,
+      zoom: clampPersistedZoom(parsed.zoom)
+    }
+  } catch {
+    return {
+      background: DEFAULT_PLAYBACK.background,
+      fps: DEFAULT_PLAYBACK.fps,
+      loopMode: DEFAULT_PLAYBACK.loopMode,
+      previewSkip: DEFAULT_PLAYBACK.previewSkip,
+      reverse: DEFAULT_PLAYBACK.reverse,
+      zoom: DEFAULT_PLAYBACK.zoom
+    }
+  }
+}
+
+const loadExportPreferences = (): PersistedExportPreferences => {
+  if (typeof window === 'undefined') {
+    return {
+      exportSettings: DEFAULT_EXPORT,
+      lastDirectory: null
+    }
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(EXPORT_PREFERENCES_KEY)
+    if (!rawValue) {
+      return {
+        exportSettings: DEFAULT_EXPORT,
+        lastDirectory: null
+      }
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<PersistedExportPreferences> & { exportSettings?: Partial<ExportSettings> }
+    const rawExport: Partial<ExportSettings> = parsed.exportSettings ?? {}
+
+    return {
+      exportSettings: {
+        exportSkip:
+          typeof rawExport.exportSkip === 'number' ? Math.max(0, Math.min(99, Math.round(rawExport.exportSkip))) : DEFAULT_EXPORT.exportSkip,
+        fileNamePrefix: typeof rawExport.fileNamePrefix === 'string' && rawExport.fileNamePrefix.trim() ? rawExport.fileNamePrefix : DEFAULT_EXPORT.fileNamePrefix,
+        imageFormat:
+          rawExport.imageFormat === 'jpeg' || rawExport.imageFormat === 'webp' ? rawExport.imageFormat : DEFAULT_EXPORT.imageFormat,
+        padding: typeof rawExport.padding === 'number' ? Math.max(1, Math.min(8, Math.round(rawExport.padding))) : DEFAULT_EXPORT.padding,
+        spriteSheetColumns:
+          typeof rawExport.spriteSheetColumns === 'number' ? Math.max(0, Math.round(rawExport.spriteSheetColumns)) : DEFAULT_EXPORT.spriteSheetColumns,
+        spriteSheetRows:
+          typeof rawExport.spriteSheetRows === 'number' ? Math.max(0, Math.round(rawExport.spriteSheetRows)) : DEFAULT_EXPORT.spriteSheetRows
+      },
+      lastDirectory: typeof parsed.lastDirectory === 'string' && parsed.lastDirectory.trim() ? parsed.lastDirectory : null
+    }
+  } catch {
+    return {
+      exportSettings: DEFAULT_EXPORT,
+      lastDirectory: null
+    }
+  }
+}
+
+const getDirectoryFromPath = (targetPath: string): string | null => {
+  const normalized = targetPath.replace(/[\\/]+$/, '')
+  const lastSlashIndex = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
+  if (lastSlashIndex <= 0) {
+    return null
+  }
+
+  return normalized.slice(0, lastSlashIndex)
+}
+
+const joinDefaultFilePath = (directory: string | null, fileName: string): string => {
+  if (!directory) {
+    return fileName
+  }
+
+  return `${directory.replace(/[\\/]+$/, '')}/${fileName}`
+}
+
 export default function App() {
   const frames = useEditorStore((state) => state.frames)
   const playback = useEditorStore((state) => state.playback)
@@ -314,6 +466,7 @@ export default function App() {
   const setCurrentFrame = useEditorStore((state) => state.setCurrentFrame)
   const setErrorMessage = useEditorStore((state) => state.setErrorMessage)
   const setIsPlaying = useEditorStore((state) => state.setIsPlaying)
+  const setSelectedFrames = useEditorStore((state) => state.setSelectedFrames)
   const setStatusMessage = useEditorStore((state) => state.setStatusMessage)
   const undo = useEditorStore((state) => state.undo)
   const updateExportSettings = useEditorStore((state) => state.updateExportSettings)
@@ -333,13 +486,18 @@ export default function App() {
   const [isWindowDragActive, setIsWindowDragActive] = useState(false)
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null)
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => loadUiPreferences())
+  const [persistedPlaybackPreferences] = useState<PersistedPlaybackPreferences>(() => loadPlaybackPreferences())
+  const [persistedExportPreferences] = useState<PersistedExportPreferences>(() => loadExportPreferences())
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
   const [pendingSplitExportGeometry, setPendingSplitExportGeometry] = useState<SheetGeometryState | null>(null)
+  const [appliedSheetGeometrySignature, setAppliedSheetGeometrySignature] = useState<string | null>(null)
+  const [lastExportDirectory, setLastExportDirectory] = useState<string | null>(persistedExportPreferences.lastDirectory)
   const operationRef = useRef<OperationController | null>(null)
   const smokeFnsRef = useRef<SmokeBridge | null>(null)
   const drawerCloseTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
   const drawerOpenTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
   const drawerRefs = useRef<{ left: HTMLElement | null; right: HTMLElement | null }>({ left: null, right: null })
+  const didHydratePersistentPreferencesRef = useRef(false)
   const windowDragDepthRef = useRef(0)
 
   const clearWindowDragState = useEffectEvent(() => {
@@ -374,6 +532,50 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(uiPreferences))
   }, [uiPreferences])
+
+  useEffect(() => {
+    if (didHydratePersistentPreferencesRef.current) {
+      return
+    }
+
+    didHydratePersistentPreferencesRef.current = true
+    updatePlaybackSettings(
+      {
+        background: persistedPlaybackPreferences.background,
+        fps: persistedPlaybackPreferences.fps,
+        loopMode: persistedPlaybackPreferences.loopMode,
+        previewSkip: persistedPlaybackPreferences.previewSkip,
+        reverse: persistedPlaybackPreferences.reverse,
+        zoom: persistedPlaybackPreferences.zoom
+      },
+      false
+    )
+    updateExportSettings(persistedExportPreferences.exportSettings, false)
+  }, [persistedExportPreferences.exportSettings, persistedPlaybackPreferences, updateExportSettings, updatePlaybackSettings])
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      PLAYBACK_PREFERENCES_KEY,
+      JSON.stringify({
+        background: playback.background,
+        fps: playback.fps,
+        loopMode: playback.loopMode,
+        previewSkip: playback.previewSkip,
+        reverse: playback.reverse,
+        zoom: playback.zoom
+      } satisfies PersistedPlaybackPreferences)
+    )
+  }, [playback.background, playback.fps, playback.loopMode, playback.previewSkip, playback.reverse, playback.zoom])
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      EXPORT_PREFERENCES_KEY,
+      JSON.stringify({
+        exportSettings,
+        lastDirectory: lastExportDirectory
+      } satisfies PersistedExportPreferences)
+    )
+  }, [exportSettings, lastExportDirectory])
 
   useEffect(() => {
     const drawerCloseTimers = drawerCloseTimersRef.current
@@ -614,6 +816,20 @@ export default function App() {
 
     ensureOperationActive(controller)
     applyImportSession(session)
+    updatePlaybackSettings(
+      {
+        background: playback.background,
+        fps: payloads.length === 1 && payloads[0]?.extension === 'gif' ? session.playback.fps : playback.fps,
+        loopMode: playback.loopMode,
+        previewSkip: playback.previewSkip,
+        reverse: playback.reverse,
+        zoom: playback.zoom
+      },
+      false
+    )
+    setAppliedSheetGeometrySignature(
+      session.sheet.autoApplied ? buildSheetGeometrySignature(session.sheet.source, getSheetGeometry(session.sheet)) : null
+    )
     setPingPongDirection(1)
   }
 
@@ -851,6 +1067,7 @@ export default function App() {
             rows: geometry.rows
           }
         })
+        setAppliedSheetGeometrySignature(buildSheetGeometrySignature(source, geometry))
         setPingPongDirection(1)
         setStatusMessage(`已按 ${geometry.rows} x ${geometry.columns} 拆分为 ${nextFrames.length} 帧。`)
       },
@@ -926,7 +1143,10 @@ export default function App() {
       return
     }
 
-    const directory = await window.desktopApi.chooseDirectory('选择图片序列导出文件夹')
+    const directory = await window.desktopApi.chooseDirectory({
+      defaultPath: lastExportDirectory ?? undefined,
+      title: '选择图片序列导出文件夹'
+    })
     if (!directory) {
       return
     }
@@ -942,6 +1162,7 @@ export default function App() {
       },
       async (controller) => {
         await exportFramesToDirectory(directory, exportFrames, 'export-sequence', controller, writtenPaths)
+        setLastExportDirectory(directory)
         setStatusMessage(`已导出 ${exportFrames.length} 张图片到 ${directory}`)
         showExportNotice('单帧导出完成', directory)
       },
@@ -962,7 +1183,10 @@ export default function App() {
 
     const source = sheet.source
 
-    const directory = await window.desktopApi.chooseDirectory('选择拆分结果导出文件夹')
+    const directory = await window.desktopApi.chooseDirectory({
+      defaultPath: lastExportDirectory ?? undefined,
+      title: '选择拆分结果导出文件夹'
+    })
     if (!directory) {
       return
     }
@@ -990,6 +1214,7 @@ export default function App() {
 
         ensureOperationActive(controller)
         await exportFramesToDirectory(directory, splitFrames, 'export-split-sequence', controller, writtenPaths)
+        setLastExportDirectory(directory)
         setStatusMessage(`已导出 ${splitFrames.length} 张拆分图片到 ${directory}`)
         showExportNotice('拆分导出完成', directory)
         setPendingSplitExportGeometry(null)
@@ -1056,7 +1281,7 @@ export default function App() {
 
         const savedPath = await window.desktopApi.saveBinaryFile({
           data: Array.from(bytes),
-          defaultPath: `${exportSettings.fileNamePrefix}_sheet.${exportSettings.imageFormat}`,
+          defaultPath: joinDefaultFilePath(lastExportDirectory, `${exportSettings.fileNamePrefix}_sheet.${exportSettings.imageFormat}`),
           filters: saveFiltersByFormat[exportSettings.imageFormat],
           title: '导出序列图'
         })
@@ -1066,6 +1291,7 @@ export default function App() {
           return
         }
 
+        setLastExportDirectory(getDirectoryFromPath(savedPath))
         setStatusMessage(`已导出序列图：${savedPath}`)
         showExportNotice('序列图导出完成', savedPath)
       },
@@ -1100,7 +1326,7 @@ export default function App() {
 
         const savedPath = await window.desktopApi.saveBinaryFile({
           data: Array.from(bytes),
-          defaultPath: `${exportSettings.fileNamePrefix}.gif`,
+          defaultPath: joinDefaultFilePath(lastExportDirectory, `${exportSettings.fileNamePrefix}.gif`),
           filters: saveFiltersByFormat.gif,
           title: '导出 GIF'
         })
@@ -1110,6 +1336,7 @@ export default function App() {
           return
         }
 
+        setLastExportDirectory(getDirectoryFromPath(savedPath))
         setStatusMessage(`已导出 GIF：${savedPath}`)
         showExportNotice('GIF 导出完成', savedPath)
       },
@@ -1122,8 +1349,21 @@ export default function App() {
     setExportNotice(null)
     setIsExportPanelOpen(false)
     setPendingSplitExportGeometry(null)
+    setAppliedSheetGeometrySignature(null)
     setPingPongDirection(1)
     resetWorkspace()
+    updatePlaybackSettings(
+      {
+        background: playback.background,
+        fps: playback.fps,
+        loopMode: playback.loopMode,
+        previewSkip: playback.previewSkip,
+        reverse: playback.reverse,
+        zoom: playback.zoom
+      },
+      false
+    )
+    updateExportSettings(exportSettings, false)
   }
 
   const handleRevealExportLocation = async (): Promise<void> => {
@@ -1140,6 +1380,12 @@ export default function App() {
   }
 
   const handleGlobalKeydown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === 'F1') {
+      event.preventDefault()
+      setIsHelpOpen((current) => !current)
+      return
+    }
+
     if (event.key === 'Escape' && isSettingsOpen) {
       event.preventDefault()
       setIsSettingsOpen(false)
@@ -1172,12 +1418,6 @@ export default function App() {
 
     const isPrimaryModifier = event.ctrlKey || event.metaKey
 
-    if (event.key === 'F1') {
-      event.preventDefault()
-      setIsHelpOpen(true)
-      return
-    }
-
     if (isPrimaryModifier && event.key.toLowerCase() === 'o') {
       event.preventDefault()
       if (event.shiftKey) {
@@ -1185,6 +1425,33 @@ export default function App() {
       } else {
         void handleImportFiles()
       }
+      return
+    }
+
+    if (isPrimaryModifier && event.key.toLowerCase() === 'a') {
+      if (frames.length === 0) {
+        return
+      }
+      event.preventDefault()
+      setSelectedFrames(
+        frames.map((frame) => frame.id),
+        frames.at(-1)?.id ?? null
+      )
+      return
+    }
+
+    if (isPrimaryModifier && event.key.toLowerCase() === 'e') {
+      if (frames.length === 0 && !sheetGeometry.canApply) {
+        return
+      }
+      event.preventDefault()
+      openExportModal()
+      return
+    }
+
+    if (isPrimaryModifier && event.key === ',') {
+      event.preventDefault()
+      setIsSettingsOpen(true)
       return
     }
 
@@ -1210,13 +1477,37 @@ export default function App() {
       return
     }
 
-    if (event.key === 'ArrowLeft') {
+    if ((event.key.toLowerCase() === 'f' && event.shiftKey) || (isPrimaryModifier && event.key === '0')) {
+      event.preventDefault()
+      updatePlaybackSettings({ zoom: 'fit' }, false)
+      return
+    }
+
+    if (event.key === 'Home') {
+      if (playbackSequence.length === 0) {
+        return
+      }
+      event.preventDefault()
+      setCurrentFrame(playbackSequence[0] ?? 0)
+      return
+    }
+
+    if (event.key === 'End') {
+      if (playbackSequence.length === 0) {
+        return
+      }
+      event.preventDefault()
+      setCurrentFrame(playbackSequence.at(-1) ?? 0)
+      return
+    }
+
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key.toLowerCase() === 'd') {
       event.preventDefault()
       handlePrevious()
       return
     }
 
-    if (event.key === 'ArrowRight') {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key.toLowerCase() === 'f') {
       event.preventDefault()
       handleNext()
       return
@@ -1225,6 +1516,7 @@ export default function App() {
     if ((event.key === 'Delete' || event.key === 'Backspace') && selectedFrameIds.length > 0 && !isBusy) {
       event.preventDefault()
       deleteSelectedFrames()
+      return
     }
   })
 
@@ -1501,6 +1793,7 @@ export default function App() {
                 </button>
               </div>
               <SheetPanel
+                appliedGeometrySignature={appliedSheetGeometrySignature}
                 canApply={sheetGeometry.canApply}
                 columns={sheetGeometry.columns}
                 exportSettings={exportSettings}
