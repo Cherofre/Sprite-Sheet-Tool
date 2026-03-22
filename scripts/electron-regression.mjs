@@ -173,7 +173,7 @@ try {
       : null
   })
 
-  await window.locator('.drawer-handle-left').hover()
+  await window.locator('.drawer-handle-left .handle-activate-zone').hover()
   await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-left')) ? true : null))
 
   await window.locator('.drawer-handle-left .handle-lock-button').click()
@@ -181,7 +181,7 @@ try {
   await window.waitForTimeout(350)
   await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-left')) ? true : null))
 
-  await window.locator('.drawer-handle-right').hover()
+  await window.locator('.drawer-handle-right .handle-activate-zone').hover()
   await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-right')) ? true : null))
   await window.locator('.sidebar-drawer-right .drawer-lock-btn').click()
   await waitFor(async () => ((await window.locator('.sidebar-drawer-fixed').count()) === 1 ? true : null))

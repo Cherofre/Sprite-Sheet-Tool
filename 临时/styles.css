@@ -1,110 +1,74 @@
-/* 抽屉基础宽度调整（330px内容 + 28px文本标签把手） */
-.sidebar-drawer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 358px; 
-  display: flex;
-  z-index: 100;
-  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+/* Radix Context Menu Styles */
+.ContextMenuContent,
+.ContextMenuSubContent {
+  min-width: 180px;
+  background: rgba(28, 33, 39, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  box-shadow: 0px 10px 38px -10px rgba(0, 0, 0, 0.5), 0px 10px 20px -15px rgba(0, 0, 0, 0.3);
+  z-index: 9999;
+  animation: contextMenuFadeIn 0.15s ease;
 }
 
-/* 左侧抽屉定位 */
-.sidebar-drawer-left {
-  left: 0;
-  transform: translateX(calc(-100% + 28px));
-}
-.sidebar-drawer-left:hover,
-.sidebar-drawer-left:focus-within {
-  transform: translateX(0);
-}
-
-/* 右侧抽屉定位 */
-.sidebar-drawer-right {
-  right: 0;
-  transform: translateX(calc(100% - 28px));
-}
-.sidebar-drawer-right:hover,
-.sidebar-drawer-right:focus-within {
-  transform: translateX(0);
-}
-
-/* 把手区样式升级 */
-.drawer-handle {
-  width: 28px;
+.ContextMenuItem,
+.ContextMenuSubTrigger,
+.ContextMenuCheckboxItem {
+  font-size: 0.85rem;
+  color: var(--text-main);
+  border-radius: 4px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: rgba(30, 34, 39, 0.9);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
-}
-
-.drawer-handle:hover {
-  background: rgba(255, 138, 77, 0.1);
-  border-color: rgba(255, 138, 77, 0.3);
-}
-
-.drawer-handle-left {
-  border-left: none;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.2);
-}
-
-.drawer-handle-right {
-  border-right: none;
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
-  box-shadow: -2px 0 12px rgba(0, 0, 0, 0.2);
-}
-
-/* 竖排文字标签 */
-.handle-text {
-  writing-mode: vertical-lr; /* 文字转为垂直排版 */
-  letter-spacing: 4px;
-  color: var(--text-dim);
-  font-size: 0.82rem;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
+  padding: 6px 12px;
+  position: relative;
   user-select: none;
-  transition: color 0.2s ease;
+  outline: none;
+  cursor: pointer;
+  transition: background 0.1s ease;
 }
 
-.drawer-handle:hover .handle-text {
+/* 悬停/选中状态 */
+.ContextMenuItem[data-highlighted],
+.ContextMenuSubTrigger[data-highlighted],
+.ContextMenuCheckboxItem[data-highlighted] {
+  background: var(--accent);
+  color: #111;
+}
+
+/* 禁用状态 */
+.ContextMenuItem[data-disabled] {
+  color: var(--text-dim);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 菜单分割线 */
+.ContextMenuSeparator {
+  height: 1px;
+  background-color: rgba(255, 255, 255, 0.08);
+  margin: 4px;
+}
+
+/* 红色警告选项（如删除） */
+.ContextMenuItem.danger {
+  color: #ff4d4f;
+}
+.ContextMenuItem.danger[data-highlighted] {
+  background: #ff4d4f;
   color: #fff;
 }
 
-/* 指示箭头与呼吸动画 */
-.handle-icon {
-  font-family: ui-monospace, monospace;
-  font-size: 1.2rem;
-  color: var(--accent);
-  margin-top: 6px;
-  margin-bottom: 6px;
-  animation: pulse-opacity 2s infinite ease-in-out;
+/* 子菜单指示器 */
+.RightSlot {
+  margin-left: auto;
+  padding-left: 16px;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 0.75rem;
 }
 
-/* 抽屉展开时，箭头方向反转并停止呼吸 */
-.sidebar-drawer-left:hover .handle-icon-left,
-.sidebar-drawer-left:focus-within .handle-icon-left {
-  transform: rotate(180deg);
-  animation: none;
-}
-
-.sidebar-drawer-right:hover .handle-icon-right,
-.sidebar-drawer-right:focus-within .handle-icon-right {
-  transform: rotate(180deg);
-  animation: none;
-}
-
-@keyframes pulse-opacity {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
-}
-
-/* 隐藏旧的 handle-pill 样式（如果还有的话） */
-.handle-pill {
-  display: none;
+@keyframes contextMenuFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
 }

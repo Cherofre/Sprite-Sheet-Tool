@@ -211,6 +211,23 @@ const clampFps = (value: number): number => Math.max(1, Math.min(60, Math.round(
 const getExportOperationTitle = (stage: 'export-sequence' | 'export-split-sequence'): string =>
   stage === 'export-sequence' ? '正在导出图片' : '正在导出拆分结果'
 
+const HandleLockIcon = ({ locked }: { locked: boolean }) =>
+  locked ? (
+    <svg aria-hidden="true" className="handle-lock-icon" viewBox="0 0 24 24">
+      <path
+        d="M7 10V8a5 5 0 0 1 10 0v2h1a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h1Zm2 0h6V8a3 3 0 1 0-6 0v2Zm3 3a2 2 0 0 1 1 3.732V19h-2v-2.268A2 2 0 0 1 12 13Z"
+        fill="currentColor"
+      />
+    </svg>
+  ) : (
+    <svg aria-hidden="true" className="handle-lock-icon" viewBox="0 0 24 24">
+      <path
+        d="M17 8V7a5 5 0 0 0-9.2-2.8 1 1 0 1 0 1.7 1 3 3 0 0 1 5.5 1.8v1H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1Zm1 11H8v-9h10v9Zm-6-6a2 2 0 0 1 1 3.732V18h-2v-1.268A2 2 0 0 1 12 13Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+
 const toggleFixedMode = (currentMode: UiPreferences['drawerFixedMode'], side: 'left' | 'right'): UiPreferences['drawerFixedMode'] => {
   if (side === 'left') {
     switch (currentMode) {
@@ -312,6 +329,7 @@ export default function App() {
   const smokeFnsRef = useRef<SmokeBridge | null>(null)
   const drawerCloseTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
   const drawerOpenTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
+  const drawerRefs = useRef<{ left: HTMLElement | null; right: HTMLElement | null }>({ left: null, right: null })
   const windowDragDepthRef = useRef(0)
 
   const clearWindowDragState = useEffectEvent(() => {
@@ -429,6 +447,15 @@ export default function App() {
     setDrawerLocks((state) => {
       const nextLocked = !state[side]
       setDrawerOpen((openState) => ({ ...openState, [side]: nextLocked || openState[side] }))
+      if (!nextLocked) {
+        window.setTimeout(() => {
+          const drawerElement = drawerRefs.current[side]
+          const activeElement = document.activeElement
+          if (drawerElement && !drawerElement.matches(':hover') && !drawerElement.contains(activeElement)) {
+            scheduleDrawerClose(side)
+          }
+        }, 0)
+      }
       return { ...state, [side]: nextLocked }
     })
   })
@@ -450,6 +477,15 @@ export default function App() {
       ...patch
     }))
   }
+
+  const openExportModal = useEffectEvent((options?: { collapseRightDrawer?: boolean }) => {
+    clearDrawerOpenTimer('right')
+    clearDrawerCloseTimer('right')
+    if (options?.collapseRightDrawer !== false && !isDrawerPinned('right')) {
+      setDrawerOpen((state) => ({ ...state, right: false }))
+    }
+    setIsExportPanelOpen(true)
+  })
 
   const showExportNotice = (label: string, targetPath: string): void => {
     setExportNotice({
@@ -1425,17 +1461,19 @@ export default function App() {
             ]
               .filter(Boolean)
               .join(' ')}
+            ref={(element) => {
+              drawerRefs.current.left = element
+            }}
             onBlurCapture={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                 scheduleDrawerClose('left')
               }
             }}
-            onFocusCapture={() => openDrawer('left')}
             onMouseEnter={() => scheduleDrawerOpen('left')}
             onMouseLeave={() => scheduleDrawerClose('left')}
             style={!sheet.source ? { display: 'none' } : undefined}
           >
-            <div className="drawer-content">
+            <div className="drawer-content" onFocusCapture={() => openDrawer('left')} onMouseEnter={() => openDrawer('left')}>
               <div className="drawer-topbar">
                 <span className="drawer-title">图集识别</span>
                 <button
@@ -1459,7 +1497,7 @@ export default function App() {
                 }}
                 onChooseCandidate={handleChooseCandidate}
                 onExportSplitSequence={() => {
-                  setIsExportPanelOpen(true)
+                  openExportModal()
                 }}
                 onUpdateSheet={handleUpdateSheet}
                 predictedFrameCount={sheetGeometry.predictedFrameCount}
@@ -1470,14 +1508,19 @@ export default function App() {
             <div className="drawer-handle drawer-handle-left">
               <button
                 className={drawerLocks.left ? 'handle-lock-button active' : 'handle-lock-button'}
-                onClick={() => toggleDrawerLock('left')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  toggleDrawerLock('left')
+                }}
                 title={drawerLocks.left ? '取消临时锁定左侧抽屉' : '临时锁定左侧抽屉'}
                 type="button"
               >
-                锁
+                <HandleLockIcon locked={drawerLocks.left} />
               </button>
-              <span className="handle-text">图集识别</span>
-              <span className="handle-icon handle-icon-left">»</span>
+              <div className="handle-activate-zone" onMouseEnter={() => scheduleDrawerOpen('left')}>
+                <span className="handle-text">图集识别</span>
+                <span className="handle-icon handle-icon-left">»</span>
+              </div>
             </div>
           </aside>
 
@@ -1632,12 +1675,14 @@ export default function App() {
             ]
               .filter(Boolean)
               .join(' ')}
+            ref={(element) => {
+              drawerRefs.current.right = element
+            }}
             onBlurCapture={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                 scheduleDrawerClose('right')
               }
             }}
-            onFocusCapture={() => openDrawer('right')}
             onMouseEnter={() => scheduleDrawerOpen('right')}
             onMouseLeave={() => scheduleDrawerClose('right')}
             style={frames.length === 0 && !sheet.source ? { display: 'none' } : undefined}
@@ -1645,16 +1690,21 @@ export default function App() {
             <div className="drawer-handle drawer-handle-right">
               <button
                 className={drawerLocks.right ? 'handle-lock-button active' : 'handle-lock-button'}
-                onClick={() => toggleDrawerLock('right')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  toggleDrawerLock('right')
+                }}
                 title={drawerLocks.right ? '取消临时锁定右侧抽屉' : '临时锁定右侧抽屉'}
                 type="button"
               >
-                锁
+                <HandleLockIcon locked={drawerLocks.right} />
               </button>
-              <span className="handle-text">编辑与导出</span>
-              <span className="handle-icon handle-icon-right">«</span>
+              <div className="handle-activate-zone" onMouseEnter={() => scheduleDrawerOpen('right')}>
+                <span className="handle-text">编辑与导出</span>
+                <span className="handle-icon handle-icon-right">«</span>
+              </div>
             </div>
-            <div className="drawer-content">
+            <div className="drawer-content" onFocusCapture={() => openDrawer('right')} onMouseEnter={() => openDrawer('right')}>
               <div className="drawer-topbar">
                 <span className="drawer-title">编辑与导出</span>
                 <button
