@@ -2,10 +2,13 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 
 import App from './App'
+import { RendererCrashBoundary } from './components/RendererCrashBoundary'
 import './styles.css'
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <RendererCrashBoundary>
+      <App />
+    </RendererCrashBoundary>
   </React.StrictMode>
 )

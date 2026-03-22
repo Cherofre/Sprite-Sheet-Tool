@@ -56,8 +56,13 @@ try {
     files.forEach((file) => dataTransfer.items.add(file))
 
     window.dispatchEvent(new window.DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }))
-    window.dispatchEvent(new window.DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))
-    window.dispatchEvent(new window.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }))
+    const dropTarget = window.document.querySelector('.empty-workspace-drop')
+    if (!(dropTarget instanceof window.HTMLElement)) {
+      throw new Error('Smoke could not find the empty workspace drop zone.')
+    }
+
+    dropTarget.dispatchEvent(new window.DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))
+    dropTarget.dispatchEvent(new window.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }))
   }, { base64: pngBase64, names: ['frame_1.png', 'frame_2.png', 'frame_3.png'] })
 
   try {
@@ -67,6 +72,8 @@ try {
     console.error('Smoke import body snapshot:\n', bodyText)
     throw error
   }
+
+  await waitFor(async () => (await window.locator('.drop-overlay').count()) === 0)
 
   await waitFor(async () => {
     const bodyText = await window.locator('body').innerText()

@@ -20,7 +20,7 @@ interface PreviewThumb {
   index: number
 }
 
-const PREVIEW_THUMB_SIZE = 88
+const PREVIEW_THUMB_SIZE = 68
 
 export function SplitPreview({
   canApply,

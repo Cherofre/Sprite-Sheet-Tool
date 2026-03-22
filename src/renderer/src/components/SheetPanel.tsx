@@ -42,7 +42,7 @@ export function SheetPanel({
           <span className="eyebrow">拆分</span>
           <h2>图集识别</h2>
         </div>
-        <p className="muted-copy">导入单张图后，可以按规则图集方式预览，并手动覆盖行列或帧尺寸。</p>
+        <p className="muted-copy">导入单张图后，可以预览规则图集的切分结果，并手动覆盖行列或帧尺寸。</p>
       </section>
     )
   }
@@ -176,14 +176,14 @@ export function SheetPanel({
           应用到时间轴
         </button>
         <button className="secondary-button" disabled={!canApply || isBusy} onClick={onExportSplitSequence} type="button">
-          直接导出拆分序列
+          导出拆分序列
         </button>
       </div>
 
       <div className="hint-card">
-        <span className="eyebrow">直接导出</span>
+        <span className="eyebrow">导出设置</span>
         <p>
-          使用右侧输出设置：{exportSettings.imageFormat.toUpperCase()}，前缀“{exportSettings.fileNamePrefix}”，补零
+          当前会复用统一导出设置：{exportSettings.imageFormat.toUpperCase()}，前缀“{exportSettings.fileNamePrefix}”，补零
           {` ${exportSettings.padding} `}
           位，跳帧 {exportSettings.exportSkip}。
         </p>
@@ -210,7 +210,7 @@ export function SheetPanel({
             </option>
             {sheet.candidates.map((candidate) => (
               <option key={candidate.label} value={candidate.label}>
-                {candidate.label} (置信度 {(candidate.confidence * 100).toFixed(0)}%)
+                {candidate.label}（置信度 {(candidate.confidence * 100).toFixed(0)}%）
               </option>
             ))}
           </select>

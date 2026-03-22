@@ -1,11 +1,12 @@
   return (
     <div className="app-shell">
-      <header className="app-header">
+      <header className="app-header" style={{ paddingBottom: '0.8rem' }}>
         <div className="app-header-left">
           <span className="eyebrow-header">桌面工具链</span>
           <h1>序列图工具</h1>
         </div>
-        <div className="app-header-right" style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <div className="app-header-right" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
+          {/* 去掉了长描述文字，按钮加上了明确的背景，不再隐形 */}
           <button className="ghost-button" disabled={isBusy} onClick={handleImportFiles} type="button">📁 导入文件</button>
           <button className="ghost-button" disabled={isBusy} onClick={handleImportFolder} type="button">📂 导入文件夹</button>
           <button className="ghost-button" disabled={!canClear || isBusy} onClick={handleClearWorkspace} type="button">🗑️ 清空工作区</button>
@@ -23,7 +24,7 @@
           <SheetPanel canApply={sheetGeometry.canApply} columns={sheetGeometry.columns} exportSettings={exportSettings} frameHeight={sheetGeometry.frameHeight} frameWidth={sheetGeometry.frameWidth} isBusy={isBusy} onApply={() => { void handleApplySheet() }} onChooseCandidate={handleChooseCandidate} onExportSplitSequence={() => { void handleExportSplitSequence() }} onUpdateSheet={handleUpdateSheet} predictedFrameCount={sheetGeometry.predictedFrameCount} rows={sheetGeometry.rows} sheet={sheet} />
         </aside>
 
-        {/* 中间：巨大空状态引导 or 核心视口与控制条 */}
+        {/* 中间核心工作区 */}
         <main className="preview-column">
           {frames.length === 0 && !sheet.source ? (
             <div className="empty-workspace-drop" onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const droppedFiles = Array.from(e.dataTransfer.files); if (droppedFiles.length > 0) void importDroppedFiles(droppedFiles); }}>
@@ -35,39 +36,59 @@
             </div>
           ) : (
             <>
+              {/* PreviewStage 里已经内置了鼠标滚轮支持缩放 */}
               <PreviewStage background={playback.background} frame={currentFrame} zoom={playback.zoom} onZoomChange={(zoom) => updatePlaybackSettings({ zoom }, false)} />
               
-              {/* 超级大整合：AE级底层工具条 */}
-              <div className="viewport-toolbar">
-                <div className="vt-left">
-                  <select value={playback.background} onChange={(e) => updatePlaybackSettings({ background: e.target.value as any }, false)}>
-                    <option value="checker">棋盘</option><option value="black">纯黑</option><option value="white">纯白</option>
-                  </select>
-                  <select value={playback.zoom} onChange={(e) => updatePlaybackSettings({ zoom: e.target.value === 'fit' ? 'fit' : Number(e.target.value) }, false)}>
-                    <option value="fit">适应</option><option value="50">50%</option><option value="100">100%</option><option value="200">200%</option><option value="400">400%</option>
-                  </select>
-                  {currentFrame && <span className="compact-info" title={`${currentFrame.name} (${currentFrame.width}x${currentFrame.height})`}>{currentFrame.name} | {currentFrame.width}x{currentFrame.height}</span>}
-                </div>
+              {/* 全新优化的：视口双行控制区 */}
+              <div className="viewport-controls-stack">
                 
-                <div className="vt-center">
-                  <button className="secondary-button" disabled={frames.length === 0} onClick={handlePrevious}>|◀</button>
-                  <button className="play-action-btn" disabled={frames.length === 0} onClick={handleTogglePlay}>{playback.isPlaying ? '⏸ 暂停' : '▶ 播放'}</button>
-                  <button className="secondary-button" disabled={frames.length === 0} onClick={handleNext}>▶|</button>
+                {/* 第一行：视图参数与文件名信息 */}
+                <div className="viewport-info-row">
+                  <select style={{ minWidth: '90px', padding: '0.1rem 1.6rem 0.1rem 0.4rem', fontSize: '0.75rem' }} value={playback.background} onChange={(e) => updatePlaybackSettings({ background: e.target.value as any }, false)}>
+                    <option value="checker">背景: 棋盘</option><option value="black">背景: 纯黑</option><option value="white">背景: 纯白</option>
+                  </select>
+                  <select style={{ minWidth: '90px', padding: '0.1rem 1.6rem 0.1rem 0.4rem', fontSize: '0.75rem' }} value={playback.zoom} onChange={(e) => updatePlaybackSettings({ zoom: e.target.value === 'fit' ? 'fit' : Number(e.target.value) }, false)}>
+                    <option value="fit">缩放: 适应</option><option value="50">50%</option><option value="100">100%</option><option value="200">200%</option><option value="400">400%</option>
+                  </select>
+                  
+                  {currentFrame && (
+                    <span className="compact-info" title={`${currentFrame.name} \n尺寸: ${currentFrame.width} x ${currentFrame.height}`}>
+                      {currentFrame.name} <span style={{ opacity: 0.4, margin: '0 6px' }}>|</span> <strong>{currentFrame.width} x {currentFrame.height}</strong>
+                    </span>
+                  )}
                 </div>
-                
-                <div className="vt-right">
-                  {/* 支持滚轮调整的 FPS 滑块区 */}
-                  <div className="fps-control" onWheel={(e) => {
-                    const step = e.deltaY < 0 ? 1 : -1;
-                    updatePlaybackSettings({ fps: Math.max(1, Math.min(60, playback.fps + step)) });
-                  }}>
-                    <span>FPS: {playback.fps}</span>
-                    <input type="range" max={60} min={1} value={playback.fps} onChange={(e) => updatePlaybackSettings({ fps: Number(e.target.value) })} />
+
+                {/* 第二行：播放控制轴 */}
+                <div className="viewport-transport-row">
+                  {/* 左侧：播放帧数 */}
+                  <div style={{ flex: 1, color: 'var(--text-dim)', fontSize: '0.8rem', fontVariantNumeric: 'tabular-nums' }}>
+                    {frames.length === 0 ? '0 / 0' : `${playback.currentFrame + 1} / ${frames.length}`} 帧
                   </div>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                    {frames.length === 0 ? '0/0' : `${playback.currentFrame + 1}/${frames.length}`}
-                  </span>
+                  
+                  {/* 居中：核心播放控制 + 帧率控制 */}
+                  <div className="transport-core">
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <button className="secondary-button" disabled={frames.length === 0} onClick={handlePrevious} title="上一帧 (Left)">⏮</button>
+                      <button className="play-action-btn" disabled={frames.length === 0} onClick={handleTogglePlay} title="播放/暂停 (Space)">
+                        {playback.isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                      </button>
+                      <button className="secondary-button" disabled={frames.length === 0} onClick={handleNext} title="下一帧 (Right)">⏭</button>
+                    </div>
+                    
+                    {/* 支持滚轮滑动的 FPS 控制器 */}
+                    <div className="fps-control" title="鼠标在此处滚动可调节帧率" onWheel={(e) => {
+                      const step = e.deltaY < 0 ? 1 : -1;
+                      updatePlaybackSettings({ fps: Math.max(1, Math.min(60, playback.fps + step)) });
+                    }}>
+                      <span>FPS: {playback.fps}</span>
+                      <input type="range" max={60} min={1} value={playback.fps} onChange={(e) => updatePlaybackSettings({ fps: Number(e.target.value) })} />
+                    </div>
+                  </div>
+
+                  {/* 右侧：用作弹性占位以保证播放器绝对居中 */}
+                  <div style={{ flex: 1 }}></div>
                 </div>
+
               </div>
 
               <FrameTimeline currentFrame={playback.currentFrame} frames={frames} onMoveFrame={moveFrame} onSelectFrame={selectFrame} selectedFrameIds={selectedFrameIds} />
@@ -85,7 +106,7 @@
 
       {isBusy && operationProgress ? (
         <div className="busy-overlay">
-          {/* ... 保持原有 loading 提示不变 ... */}
+           {/* ... 保持原有 loading 提示不变 ... */}
         </div>
       ) : null}
 

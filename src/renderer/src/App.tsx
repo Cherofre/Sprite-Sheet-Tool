@@ -205,6 +205,7 @@ export default function App() {
 
   const currentFrame = frames[playback.currentFrame]
   const canClear = frames.length > 0 || sheet.enabled
+  const [isExportPanelOpen, setIsExportPanelOpen] = useState(false)
   const [isHelpOpen, setIsHelpOpen] = useState(false)
   const [pingPongDirection, setPingPongDirection] = useState<1 | -1>(1)
   const [isWindowDragActive, setIsWindowDragActive] = useState(false)
@@ -212,6 +213,11 @@ export default function App() {
   const operationRef = useRef<OperationController | null>(null)
   const smokeFnsRef = useRef<SmokeBridge | null>(null)
   const windowDragDepthRef = useRef(0)
+
+  const clearWindowDragState = useEffectEvent(() => {
+    windowDragDepthRef.current = 0
+    setIsWindowDragActive(false)
+  })
 
   const playbackSequence = useMemo(
     () => buildFrameSequence(frames.length, playback.startFrame, playback.endFrame, playback.previewSkip, playback.reverse),
@@ -409,6 +415,8 @@ export default function App() {
   }
 
   const importDroppedFiles = async (files: File[]): Promise<void> => {
+    clearWindowDragState()
+
     const supportedFiles = files.filter((file) => isSupportedDroppedFile(file.name))
     if (supportedFiles.length === 0) {
       setStatusMessage('拖入内容里没有支持的图片或 GIF。')
@@ -810,8 +818,8 @@ export default function App() {
   }
 
   const handleClearWorkspace = (): void => {
-    windowDragDepthRef.current = 0
-    setIsWindowDragActive(false)
+    clearWindowDragState()
+    setIsExportPanelOpen(false)
     setPingPongDirection(1)
     resetWorkspace()
   }
@@ -992,8 +1000,7 @@ export default function App() {
       }
 
       event.preventDefault()
-      windowDragDepthRef.current = 0
-      setIsWindowDragActive(false)
+      clearWindowDragState()
 
       const droppedFiles = Array.from(event.dataTransfer?.files ?? [])
       if (droppedFiles.length > 0) {
@@ -1001,18 +1008,30 @@ export default function App() {
       }
     }
 
+    const onDragEnd = () => {
+      clearWindowDragState()
+    }
+
+    const onWindowBlur = () => {
+      clearWindowDragState()
+    }
+
     window.addEventListener('dragenter', onDragEnter)
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('dragend', onDragEnd)
     window.addEventListener('drop', onDrop)
+    window.addEventListener('blur', onWindowBlur)
 
     return () => {
       window.removeEventListener('dragenter', onDragEnter)
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('dragend', onDragEnd)
       window.removeEventListener('drop', onDrop)
+      window.removeEventListener('blur', onWindowBlur)
     }
-  }, [handleWindowDrop, isBusy, isWindowDragActive])
+  }, [clearWindowDragState, handleWindowDrop, isBusy, isWindowDragActive])
 
   useEffect(() => {
     smokeFnsRef.current = {
@@ -1097,7 +1116,7 @@ export default function App() {
             }}
             onChooseCandidate={handleChooseCandidate}
             onExportSplitSequence={() => {
-              void handleExportSplitSequence()
+              setIsExportPanelOpen(true)
             }}
             onUpdateSheet={handleUpdateSheet}
             predictedFrameCount={sheetGeometry.predictedFrameCount}
@@ -1117,6 +1136,7 @@ export default function App() {
               onDrop={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
+                clearWindowDragState()
                 const droppedFiles = Array.from(event.dataTransfer.files)
                 if (droppedFiles.length > 0) {
                   void importDroppedFiles(droppedFiles)
@@ -1200,11 +1220,9 @@ export default function App() {
                   <button className="secondary-button toolbar-nav-btn" disabled={frames.length === 0} onClick={handleNext} type="button">
                     ▶|
                   </button>
-                </div>
-
-                <div className="vt-right">
                   <div
                     className="fps-control"
+                    title="鼠标在此处滚动可调节帧率"
                     onWheel={(event) => {
                       event.preventDefault()
                       const step = event.deltaY < 0 ? 1 : -1
@@ -1220,6 +1238,9 @@ export default function App() {
                       value={playback.fps}
                     />
                   </div>
+                </div>
+
+                <div className="vt-right">
                   <span className="compact-counter">{frames.length === 0 ? '0/0' : `${playback.currentFrame + 1}/${frames.length}`}</span>
                 </div>
               </div>
@@ -1235,7 +1256,7 @@ export default function App() {
           )}
         </main>
 
-        <aside className="sidebar-column" style={frames.length === 0 ? { display: 'none' } : undefined}>
+        <aside className="sidebar-column" style={frames.length === 0 && !sheet.source ? { display: 'none' } : undefined}>
           <ImportPanel
             canRedo={canRedo}
             canUndo={canUndo}
@@ -1259,17 +1280,23 @@ export default function App() {
           />
 
           <ExportPanel
+            canExportSplitSequence={sheetGeometry.canApply}
             exportFrameCount={exportFrames.length}
             exportSettings={exportSettings}
+            isOpen={isExportPanelOpen}
             onExportGif={() => {
               void handleExportGif()
             }}
             onExportSequence={() => {
               void handleExportSequence()
             }}
+            onExportSplitSequence={() => {
+              void handleExportSplitSequence()
+            }}
             onExportSheet={() => {
               void handleExportSheet()
             }}
+            onOpenChange={setIsExportPanelOpen}
             onUpdateExport={updateExportSettings}
             recommendedLayout={recommendedLayout}
           />

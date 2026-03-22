@@ -11,6 +11,7 @@
     "lint": "eslint . --max-warnings=0",
     "package:portable": "npm run build && electron-builder --win portable --publish never",
     "smoke": "node scripts/electron-smoke.mjs",
+    "start:built": "electron .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

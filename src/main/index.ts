@@ -7,6 +7,7 @@ import { APP_NAME } from '@shared/constants'
 import { registerIpcHandlers } from './ipc'
 
 const createMainWindow = async (): Promise<void> => {
+  let rendererRecoveryAttempts = 0
   const mainWindow = new BrowserWindow({
     autoHideMenuBar: true,
     backgroundColor: '#0e1418',
@@ -26,6 +27,21 @@ const createMainWindow = async (): Promise<void> => {
   mainWindow.once('ready-to-show', () => {
     mainWindow.setMenuBarVisibility(false)
     mainWindow.show()
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[main] renderer process gone:', details)
+
+    if (rendererRecoveryAttempts >= 1 || mainWindow.isDestroyed()) {
+      return
+    }
+
+    rendererRecoveryAttempts += 1
+    setTimeout(() => {
+      if (!mainWindow.isDestroyed()) {
+        void mainWindow.webContents.reloadIgnoringCache()
+      }
+    }, 400)
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

@@ -1,10 +1,10 @@
 /* ================== 全新重构组件样式 ================== */
 
-/* 修复原生 Select 下拉框颜色 */
+/* 修复原生 Select 下拉框颜色 (纯深色背景，告别白蓝) */
 select {
   appearance: none;
-  background-color: rgba(255, 255, 255, 0.04);
-  color: var(--text-main);
+  background-color: #16191d;
+  color: #fff;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%238b92a1' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -12,33 +12,37 @@ select {
   background-position: right 0.5rem center;
   padding-right: 1.8rem;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 select:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: #1e2227;
+  border-color: #434956;
 }
 select option {
-  background-color: #1e2227; /* 纯正深色背景 */
+  background-color: #1e2227;
   color: #fff;
 }
 
-/* 顶部低调幽灵按钮 */
+/* 顶部幽灵按钮：稍微提亮，增加一点底色和边框，使其像个按钮但不过分抢眼 */
 .ghost-button {
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0.35rem 0.6rem;
   border-radius: var(--radius-sm);
   font-size: 0.85rem;
   transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 .ghost-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.12);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
-/* 美化原生滑轨 */
+/* 美化原生 FPS 滑轨 */
 input[type='range'] {
   -webkit-appearance: none;
   background: transparent;
@@ -64,8 +68,38 @@ input[type='range']::-webkit-slider-thumb:hover {
   transform: scale(1.25);
 }
 
-/* 视口底部高密度工具条 */
-.viewport-toolbar {
+/* ================== 视口双行控制条 ================== */
+.viewport-controls-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+/* 第一行：信息栏 (背景、缩放、精简文件名) */
+.viewport-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+}
+
+.compact-info {
+  flex: 1;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  min-width: 0; /* 确保弹性缩放时文字能正常省略 */
+}
+
+/* 第二行：播放控制栏 */
+.viewport-transport-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -73,55 +107,51 @@ input[type='range']::-webkit-slider-thumb:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.4rem 0.8rem;
-  flex-shrink: 0;
   gap: 1rem;
 }
-.vt-left, .vt-center, .vt-right {
+
+/* 核心居中播放组 (按钮 + 滑块) */
+.transport-core {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  justify-content: center;
+  gap: 1rem;
+  flex: 2;
 }
-.vt-left { flex: 1; justify-content: flex-start; }
-.vt-center { flex: 0 0 auto; justify-content: center; }
-.vt-right { flex: 1; justify-content: flex-end; }
 
-/* 独立播放按钮 */
 .play-action-btn {
   background: var(--accent);
   color: #111;
-  font-weight: bold;
+  font-weight: 700;
   border-radius: var(--radius-sm);
-  padding: 0.3rem 1.2rem;
+  padding: 0.35rem 1.4rem;
   border: none;
-  min-width: 76px;
+  min-width: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  box-shadow: 0 2px 8px rgba(255, 138, 77, 0.2);
 }
 .play-action-btn:hover:not(:disabled) {
   background: var(--accent-hover);
-  transform: scale(1.03);
-}
-
-.compact-info {
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  margin-left: 0.5rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 138, 77, 0.3);
 }
 
 .fps-control {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: var(--radius-sm);
-  background: rgba(0,0,0,0.2);
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 .fps-control span {
   font-size: 0.75rem;
-  color: var(--text-dim);
-  min-width: 50px;
+  color: var(--text-main);
+  min-width: 48px;
 }
 
 /* 空状态引导区 */

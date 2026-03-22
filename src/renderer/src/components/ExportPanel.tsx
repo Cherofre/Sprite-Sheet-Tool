@@ -3,11 +3,15 @@ import { useState } from 'react'
 import type { ExportSettings } from '@shared/types'
 
 interface ExportPanelProps {
+  canExportSplitSequence?: boolean
   exportFrameCount: number
   exportSettings: ExportSettings
+  isOpen?: boolean
   onExportGif: () => void
   onExportSequence: () => void
+  onExportSplitSequence?: () => void
   onExportSheet: () => void
+  onOpenChange?: (open: boolean) => void
   onUpdateExport: (patch: Partial<ExportSettings>, recordHistory?: boolean) => void
   recommendedLayout: { columns: number; rows: number }
 }
@@ -15,28 +19,41 @@ interface ExportPanelProps {
 const parseInteger = (value: string): number => Math.max(0, Number.parseInt(value || '0', 10) || 0)
 
 export function ExportPanel({
+  canExportSplitSequence = false,
   exportFrameCount,
   exportSettings,
+  isOpen,
   onExportGif,
   onExportSequence,
+  onExportSplitSequence,
   onExportSheet,
+  onOpenChange,
   onUpdateExport,
   recommendedLayout
 }: ExportPanelProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const currentOpen = isOpen ?? internalOpen
 
-  if (exportFrameCount === 0) {
+  const setOpen = (next: boolean) => {
+    if (isOpen === undefined) {
+      setInternalOpen(next)
+    }
+
+    onOpenChange?.(next)
+  }
+
+  if (exportFrameCount === 0 && !canExportSplitSequence && !currentOpen) {
     return null
   }
 
   return (
     <section className="panel stack export-launcher">
-      <button className="primary-button full-width-button export-launcher-button" onClick={() => setIsOpen(true)} type="button">
+      <button className="primary-button full-width-button export-launcher-button" onClick={() => setOpen(true)} type="button">
         配置并导出
       </button>
 
-      {isOpen ? (
-        <div className="modal-overlay" onClick={() => setIsOpen(false)}>
+      {currentOpen ? (
+        <div className="modal-overlay" onClick={() => setOpen(false)}>
           <div
             className="modal-card export-modal-card"
             onClick={(event) => {
@@ -48,7 +65,7 @@ export function ExportPanel({
                 <span className="eyebrow">导出</span>
                 <h2>高级导出设置</h2>
               </div>
-              <button className="secondary-button" onClick={() => setIsOpen(false)} type="button">
+              <button className="secondary-button" onClick={() => setOpen(false)} type="button">
                 关闭
               </button>
             </div>
@@ -96,12 +113,12 @@ export function ExportPanel({
             </div>
 
             <div className="section-heading compact export-modal-section">
-              <h3>图集自定义布局</h3>
+              <h3>图集布局</h3>
             </div>
 
             <div className="form-grid">
               <label>
-                行数 (设为 0 自动计算)
+                图集行数（0 为自动）
                 <input
                   className="number-input"
                   min={0}
@@ -111,7 +128,7 @@ export function ExportPanel({
                 />
               </label>
               <label>
-                列数 (设为 0 自动计算)
+                图集列数（0 为自动）
                 <input
                   className="number-input"
                   min={0}
@@ -127,43 +144,60 @@ export function ExportPanel({
               <p>
                 近似方形排版：{recommendedLayout.rows} 行 x {recommendedLayout.columns} 列。
                 <br />
-                共将输出 {exportFrameCount} 帧。
+                当前可导出帧数：{exportFrameCount}。
               </p>
             </div>
 
             <div className="export-action-stack export-modal-actions">
-              <button
-                className="primary-button"
-                onClick={() => {
-                  setIsOpen(false)
-                  onExportSequence()
-                }}
-                type="button"
-              >
-                导出单帧序列
-              </button>
-              <div className="dual-action-row">
+              {exportFrameCount > 0 ? (
+                <>
+                  <button
+                    className="primary-button"
+                    onClick={() => {
+                      setOpen(false)
+                      onExportSequence()
+                    }}
+                    type="button"
+                  >
+                    导出单帧序列
+                  </button>
+                  <div className="dual-action-row">
+                    <button
+                      className="secondary-button"
+                      onClick={() => {
+                        setOpen(false)
+                        onExportSheet()
+                      }}
+                      type="button"
+                    >
+                      导出大图集
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => {
+                        setOpen(false)
+                        onExportGif()
+                      }}
+                      type="button"
+                    >
+                      导出 GIF
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              {canExportSplitSequence && onExportSplitSequence ? (
                 <button
-                  className="secondary-button"
+                  className={exportFrameCount === 0 ? 'primary-button' : 'secondary-button'}
                   onClick={() => {
-                    setIsOpen(false)
-                    onExportSheet()
+                    setOpen(false)
+                    onExportSplitSequence()
                   }}
                   type="button"
                 >
-                  导出大图集
+                  导出拆分序列
                 </button>
-                <button
-                  className="secondary-button"
-                  onClick={() => {
-                    setIsOpen(false)
-                    onExportGif()
-                  }}
-                  type="button"
-                >
-                  导出 GIF
-                </button>
-              </div>
+              ) : null}
             </div>
           </div>
         </div>
