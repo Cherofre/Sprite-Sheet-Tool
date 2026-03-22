@@ -26,6 +26,7 @@
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@radix-ui/react-context-menu": "^2.2.16",
     "gifenc": "^1.0.3",
     "gifuct-js": "^2.1.2",
     "react": "^19.1.1",

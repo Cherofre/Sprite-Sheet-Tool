@@ -520,7 +520,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
-  padding-inline: 20px;
+  padding-inline: 12px;
 }
 
 .panel,
@@ -806,6 +806,16 @@ label {
   background: #111;
   display: flex;
   justify-content: center;
+}
+
+.split-preview-stage-button {
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.split-preview-stage-button:hover:not(:disabled) {
+  background: #111;
+  border-color: rgba(255, 138, 77, 0.28);
 }
 
 .sheet-preview-image {
@@ -1137,7 +1147,7 @@ label {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 0.45rem 1rem;
+  padding: 0.45rem 0.75rem;
 }
 
 .vt-left,
@@ -1568,7 +1578,7 @@ kbd {
   }
 
   .preview-column {
-    padding-inline: 16px;
+    padding-inline: 10px;
   }
 }
 
@@ -1718,5 +1728,83 @@ kbd {
   .export-toast-actions {
     grid-template-columns: 1fr;
     flex-direction: column;
+  }
+}
+
+/* Radix Context Menu Styles */
+.ContextMenuContent,
+.ContextMenuSubContent {
+  min-width: 180px;
+  background: rgba(28, 33, 39, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  box-shadow: 0 10px 38px -10px rgba(0, 0, 0, 0.5), 0 10px 20px -15px rgba(0, 0, 0, 0.3);
+  z-index: 9999;
+  animation: contextMenuFadeIn 0.15s ease;
+}
+
+.ContextMenuItem,
+.ContextMenuSubTrigger,
+.ContextMenuCheckboxItem {
+  font-size: 0.85rem;
+  color: var(--text-main);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  position: relative;
+  user-select: none;
+  outline: none;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.ContextMenuItem[data-highlighted],
+.ContextMenuSubTrigger[data-highlighted],
+.ContextMenuCheckboxItem[data-highlighted] {
+  background: var(--accent);
+  color: #111;
+}
+
+.ContextMenuItem[data-disabled] {
+  color: var(--text-dim);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ContextMenuSeparator {
+  height: 1px;
+  background-color: rgba(255, 255, 255, 0.08);
+  margin: 4px;
+}
+
+.ContextMenuItem.danger {
+  color: #ff4d4f;
+}
+
+.ContextMenuItem.danger[data-highlighted] {
+  background: #ff4d4f;
+  color: #fff;
+}
+
+.RightSlot {
+  margin-left: auto;
+  padding-left: 16px;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 0.75rem;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }

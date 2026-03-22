@@ -25,7 +25,11 @@ interface EditorState extends EditorSnapshot {
   applyImportSession: (session: ImportSession) => void
   clearError: () => void
   clearSelection: () => void
+  deleteFrames: (frameIds: string[]) => void
   deleteSelectedFrames: () => void
+  duplicateFrame: (frameId: string) => void
+  moveFramesToEnd: (frameIds: string[]) => void
+  moveFramesToStart: (frameIds: string[]) => void
   moveFrame: (activeId: string, overId: string) => void
   redo: () => void
   replaceFrames: (frames: FrameItem[], options?: ReplaceFramesOptions) => void
@@ -51,6 +55,8 @@ const arrayMove = <T>(items: T[], fromIndex: number, toIndex: number): T[] => {
   result.splice(toIndex, 0, item)
   return result
 }
+
+const uniqueFrameIds = (frameIds: string[]): string[] => Array.from(new Set(frameIds))
 
 const createSnapshotFromState = (state: EditorState): EditorSnapshot => ({
   exportSettings: state.exportSettings,
@@ -149,6 +155,27 @@ export const useEditorStore = create<EditorState>((set) => ({
       selectedFrameIds: []
     })),
 
+  deleteFrames: (frameIds) =>
+    set((state) => {
+      const idsToDelete = uniqueFrameIds(frameIds)
+      if (idsToDelete.length === 0) {
+        return state
+      }
+
+      const frames = state.frames.filter((frame) => !idsToDelete.includes(frame.id))
+      return {
+        ...snapshotToState({
+          exportSettings: state.exportSettings,
+          frames,
+          playback: state.playback,
+          selectedFrameIds: frames[0] ? [frames[0].id] : [],
+          sheet: state.sheet
+        }),
+        ...withHistory(state),
+        statusMessage: `已删除 ${idsToDelete.length} 帧。`
+      }
+    }),
+
   deleteSelectedFrames: () =>
     set((state) => {
       if (state.selectedFrameIds.length === 0) {
@@ -166,6 +193,97 @@ export const useEditorStore = create<EditorState>((set) => ({
         }),
         ...withHistory(state),
         statusMessage: `已删除 ${state.selectedFrameIds.length} 个选中帧。`
+      }
+    }),
+
+  duplicateFrame: (frameId) =>
+    set((state) => {
+      const index = state.frames.findIndex((frame) => frame.id === frameId)
+      if (index === -1) {
+        return state
+      }
+
+      const sourceFrame = state.frames[index]
+      const duplicate: FrameItem = {
+        ...sourceFrame,
+        id: crypto.randomUUID(),
+        name: `${sourceFrame.name}_copy`
+      }
+
+      const frames = [...state.frames]
+      frames.splice(index + 1, 0, duplicate)
+
+      return {
+        ...snapshotToState({
+          exportSettings: state.exportSettings,
+          frames,
+          playback: {
+            ...state.playback,
+            currentFrame: state.playback.currentFrame > index ? state.playback.currentFrame + 1 : state.playback.currentFrame
+          },
+          selectedFrameIds: [duplicate.id],
+          sheet: state.sheet
+        }),
+        ...withHistory(state),
+        statusMessage: '已复制当前帧。'
+      }
+    }),
+
+  moveFramesToEnd: (frameIds) =>
+    set((state) => {
+      const idsToMove = uniqueFrameIds(frameIds).filter((frameId) => state.frames.some((frame) => frame.id === frameId))
+      if (idsToMove.length === 0) {
+        return state
+      }
+
+      const movingFrames = state.frames.filter((frame) => idsToMove.includes(frame.id))
+      const remainingFrames = state.frames.filter((frame) => !idsToMove.includes(frame.id))
+      const frames = [...remainingFrames, ...movingFrames]
+      const currentFrameId = state.frames[state.playback.currentFrame]?.id
+      const nextCurrentFrame = currentFrameId ? frames.findIndex((frame) => frame.id === currentFrameId) : 0
+
+      return {
+        ...snapshotToState({
+          exportSettings: state.exportSettings,
+          frames,
+          playback: {
+            ...state.playback,
+            currentFrame: Math.max(0, nextCurrentFrame)
+          },
+          selectedFrameIds: movingFrames.map((frame) => frame.id),
+          sheet: state.sheet
+        }),
+        ...withHistory(state),
+        statusMessage: `已将 ${movingFrames.length} 帧移到末尾。`
+      }
+    }),
+
+  moveFramesToStart: (frameIds) =>
+    set((state) => {
+      const idsToMove = uniqueFrameIds(frameIds).filter((frameId) => state.frames.some((frame) => frame.id === frameId))
+      if (idsToMove.length === 0) {
+        return state
+      }
+
+      const movingFrames = state.frames.filter((frame) => idsToMove.includes(frame.id))
+      const remainingFrames = state.frames.filter((frame) => !idsToMove.includes(frame.id))
+      const frames = [...movingFrames, ...remainingFrames]
+      const currentFrameId = state.frames[state.playback.currentFrame]?.id
+      const nextCurrentFrame = currentFrameId ? frames.findIndex((frame) => frame.id === currentFrameId) : 0
+
+      return {
+        ...snapshotToState({
+          exportSettings: state.exportSettings,
+          frames,
+          playback: {
+            ...state.playback,
+            currentFrame: Math.max(0, nextCurrentFrame)
+          },
+          selectedFrameIds: movingFrames.map((frame) => frame.id),
+          sheet: state.sheet
+        }),
+        ...withHistory(state),
+        statusMessage: `已将 ${movingFrames.length} 帧移到开头。`
       }
     }),
 

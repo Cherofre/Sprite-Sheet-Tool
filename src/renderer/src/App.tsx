@@ -481,7 +481,7 @@ export default function App() {
   const openExportModal = useEffectEvent((options?: { collapseRightDrawer?: boolean }) => {
     clearDrawerOpenTimer('right')
     clearDrawerCloseTimer('right')
-    if (options?.collapseRightDrawer !== false && !isDrawerPinned('right')) {
+    if (options?.collapseRightDrawer !== false) {
       setDrawerOpen((state) => ({ ...state, right: false }))
     }
     setIsExportPanelOpen(true)

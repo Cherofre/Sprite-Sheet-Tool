@@ -21,6 +21,11 @@ interface PreviewThumb {
   index: number
 }
 
+interface ActivePreview {
+  dataUrl: string
+  title: string
+}
+
 const PREVIEW_THUMB_SIZE = 62
 
 export function SplitPreview({
@@ -33,7 +38,7 @@ export function SplitPreview({
   source
 }: SplitPreviewProps) {
   const [sampleThumbs, setSampleThumbs] = useState<PreviewThumb[]>([])
-  const [activeThumb, setActiveThumb] = useState<PreviewThumb | null>(null)
+  const [activePreview, setActivePreview] = useState<ActivePreview | null>(null)
   const sampleIndices = useMemo(() => buildSplitPreviewSampleIndices(predictedFrameCount, 6), [predictedFrameCount])
 
   useEffect(() => {
@@ -102,9 +107,9 @@ export function SplitPreview({
       : undefined
 
   const previewModal =
-    activeThumb && typeof document !== 'undefined'
+    activePreview && typeof document !== 'undefined'
       ? createPortal(
-          <div className="modal-overlay" onClick={() => setActiveThumb(null)}>
+          <div className="modal-overlay" onClick={() => setActivePreview(null)}>
             <div
               className="modal-card split-preview-modal-card"
               onClick={(event) => {
@@ -114,15 +119,15 @@ export function SplitPreview({
               <div className="modal-header">
                 <div>
                   <span className="eyebrow">预览</span>
-                  <h2>拆分帧 #{activeThumb.index + 1}</h2>
+                  <h2>{activePreview.title}</h2>
                 </div>
-                <button className="secondary-button" onClick={() => setActiveThumb(null)} type="button">
+                <button className="secondary-button" onClick={() => setActivePreview(null)} type="button">
                   关闭
                 </button>
               </div>
 
               <div className="split-preview-modal-body">
-                <img alt={`拆分预览 ${activeThumb.index + 1}`} className="split-preview-modal-image" src={activeThumb.dataUrl} />
+                <img alt={activePreview.title} className="split-preview-modal-image" src={activePreview.dataUrl} />
               </div>
             </div>
           </div>,
@@ -138,10 +143,14 @@ export function SplitPreview({
           <h3>拆分结果</h3>
         </div>
 
-        <div className="sheet-preview-stage">
+        <button
+          className="sheet-preview-stage split-preview-stage-button"
+          onClick={() => setActivePreview({ dataUrl: source.dataUrl, title: `${source.name} 拆分总览` })}
+          type="button"
+        >
           <img alt={source.name} className="sheet-preview-image" src={source.dataUrl} />
           {overlayStyle ? <div className="sheet-preview-overlay" style={overlayStyle} /> : null}
-        </div>
+        </button>
 
         {canApply ? (
           <div className="split-sample-grid">
@@ -149,7 +158,13 @@ export function SplitPreview({
               <button
                 className="split-sample-thumb"
                 key={thumb.index}
-                onClick={() => setActiveThumb(thumb)}
+                onClick={() =>
+                  setActivePreview({
+                    dataUrl: thumb.dataUrl,
+                    title: `拆分帧 #${thumb.index + 1}`
+                  })
+                }
+                title={`查看拆分帧 #${thumb.index + 1}`}
                 type="button"
               >
                 <img alt={`拆分预览 ${thumb.index + 1}`} src={thumb.dataUrl} />
