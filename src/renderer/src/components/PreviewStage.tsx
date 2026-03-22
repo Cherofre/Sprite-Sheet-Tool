@@ -80,11 +80,19 @@ export function PreviewStage({ background, frame, onZoomChange, zoom }: PreviewS
       <div className="preview-stage-frame">
         <ContextMenu.Root>
           <ContextMenu.Trigger asChild>
-            <div className={backgroundClassByMode[background]} onWheel={handleWheel} ref={containerRef}>
+            <div
+              className={backgroundClassByMode[background]}
+              onDragStart={(event) => {
+                event.preventDefault()
+              }}
+              onWheel={handleWheel}
+              ref={containerRef}
+            >
               {frame ? (
                 <img
                   alt={frame.name}
                   className="preview-image"
+                  draggable={false}
                   src={frame.dataUrl}
                   style={{
                     height: frame.height * scale,
@@ -150,14 +158,6 @@ export function PreviewStage({ background, frame, onZoomChange, zoom }: PreviewS
 
               <ContextMenu.Separator className="ContextMenuSeparator" />
 
-              <ContextMenu.Item
-                className="ContextMenuItem"
-                onSelect={() => {
-                  onZoomChange?.(100)
-                }}
-              >
-                缩放至 100%
-              </ContextMenu.Item>
               <ContextMenu.Item
                 className="ContextMenuItem"
                 onSelect={() => {

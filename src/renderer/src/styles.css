@@ -915,6 +915,8 @@ label {
 .preview-image {
   image-rendering: pixelated;
   object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .preview-empty {
@@ -1462,6 +1464,7 @@ input[type='range']::-webkit-slider-thumb {
 }
 
 .split-preview-modal-body {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1476,6 +1479,12 @@ input[type='range']::-webkit-slider-thumb {
   max-width: 100%;
   max-height: 56vh;
   object-fit: contain;
+}
+
+.split-preview-modal-overlay {
+  position: absolute;
+  inset: 0.5rem;
+  pointer-events: none;
 }
 
 .modal-overlay {

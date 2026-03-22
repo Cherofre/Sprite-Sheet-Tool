@@ -16,6 +16,7 @@ const buildEntry = path.join(repoRoot, 'out', 'main', 'index.js')
 const fixtureDirectory = path.join(repoRoot, 'tmp', 'regression-input')
 const outputDirectory = path.join(repoRoot, 'tmp', 'regression-output')
 const autoDetectPath = path.join(fixtureDirectory, 'auto-detect-grid.png')
+const filenameHintPath = path.join(repoRoot, 'DiscSmoke01_16x4.png')
 const gifInputPath = path.join(fixtureDirectory, 'roundtrip-input.gif')
 const gifOutputPath = path.join(outputDirectory, 'roundtrip-output.gif')
 const UI_PREFERENCES_KEY = 'sprite-sheet-tool.ui-preferences.v1'
@@ -155,16 +156,12 @@ try {
   await waitForSmokeBridge(window)
 
   await window.evaluate(async (inputPath) => {
-    const bridge = globalThis.__spriteSheetSmoke
-    if (!bridge) {
-      throw new Error('Smoke bridge is unavailable before auto-detect import.')
-    }
-    await bridge.importPaths([inputPath])
+    await window.__spriteSheetSmoke.importPaths([inputPath])
   }, autoDetectPath)
 
   const autoDetectSnapshot = await waitFor(async () => {
-    const snapshot = await window.evaluate(() => window.__spriteSheetSmoke?.getSnapshot())
-    return snapshot?.frameCount === 16 &&
+    const snapshot = await window.evaluate(() => window.__spriteSheetSmoke.getSnapshot())
+    return snapshot.frameCount === 16 &&
       snapshot.sheet.autoApplied &&
       snapshot.sheet.rows === 4 &&
       snapshot.sheet.columns === 4 &&
@@ -173,7 +170,22 @@ try {
       : null
   })
 
-  await window.locator('.drawer-handle-left .handle-activate-zone').hover()
+  await window.evaluate(async (inputPath) => {
+    await window.__spriteSheetSmoke.importPaths([inputPath])
+  }, filenameHintPath)
+
+  const filenameHintSnapshot = await waitFor(async () => {
+    const snapshot = await window.evaluate(() => window.__spriteSheetSmoke.getSnapshot())
+    return snapshot.frameCount === 64 &&
+      snapshot.sheet.autoApplied &&
+      snapshot.sheet.rows === 4 &&
+      snapshot.sheet.columns === 16 &&
+      snapshot.playback.isPlaying
+      ? snapshot
+      : null
+  }, 20000)
+
+  await window.locator('.drawer-handle-left').hover()
   await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-left')) ? true : null))
 
   await window.locator('.drawer-handle-left .handle-lock-button').click()
@@ -181,7 +193,11 @@ try {
   await window.waitForTimeout(350)
   await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-left')) ? true : null))
 
-  await window.locator('.drawer-handle-right .handle-activate-zone').hover()
+  await window.locator('.drawer-handle-left .handle-lock-button').click()
+  await window.mouse.move(960, 220)
+  await waitFor(async () => (!(await isDrawerOpen(window, '.sidebar-drawer-left')) ? true : null), 5000)
+
+  await window.locator('.drawer-handle-right').hover()
   await waitFor(async () => ((await isDrawerOpen(window, '.sidebar-drawer-right')) ? true : null))
   await window.locator('.sidebar-drawer-right .drawer-lock-btn').click()
   await waitFor(async () => ((await window.locator('.sidebar-drawer-fixed').count()) === 1 ? true : null))
@@ -190,11 +206,9 @@ try {
 
   await window.locator('button[title="设置"]').click()
   await window.locator('.settings-modal-card').waitFor({ state: 'visible' })
-
   await window.locator('.settings-modal-card input[type="number"]').fill('420')
   await window.locator('.settings-modal-card select').selectOption('both')
   await window.locator('.settings-modal-card button').getByText('关闭').click()
-
   await waitFor(async () => ((await window.locator('.sidebar-drawer-fixed').count()) === 2 ? true : null))
 
   const storedPreferences = await window.evaluate((storageKey) => {
@@ -206,12 +220,17 @@ try {
     throw new Error('UI preferences were not persisted after updating the settings modal.')
   }
 
+  await window.evaluate(async (inputPath) => {
+    await window.__spriteSheetSmoke.importPaths([inputPath])
+  }, autoDetectPath)
+
+  await waitFor(async () => {
+    const snapshot = await window.evaluate(() => window.__spriteSheetSmoke.getSnapshot())
+    return snapshot.frameCount === 16 ? true : null
+  })
+
   await window.evaluate(async () => {
-    const bridge = globalThis.__spriteSheetSmoke
-    if (!bridge) {
-      throw new Error('Smoke bridge is unavailable before sequence export.')
-    }
-    await bridge.exportSequence()
+    await window.__spriteSheetSmoke.exportSequence()
   })
 
   await waitFor(async () => {
@@ -229,24 +248,16 @@ try {
   await exportToast.waitFor({ state: 'hidden' })
 
   await window.evaluate(async (inputPath) => {
-    const bridge = globalThis.__spriteSheetSmoke
-    if (!bridge) {
-      throw new Error('Smoke bridge is unavailable before GIF import.')
-    }
-    await bridge.importPaths([inputPath])
+    await window.__spriteSheetSmoke.importPaths([inputPath])
   }, gifInputPath)
 
   await waitFor(async () => {
-    const snapshot = await window.evaluate(() => window.__spriteSheetSmoke?.getSnapshot())
-    return snapshot?.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 11 ? snapshot : null
+    const snapshot = await window.evaluate(() => window.__spriteSheetSmoke.getSnapshot())
+    return snapshot.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 11 ? snapshot : null
   })
 
   await window.evaluate(async () => {
-    const bridge = globalThis.__spriteSheetSmoke
-    if (!bridge) {
-      throw new Error('Smoke bridge is unavailable before GIF export.')
-    }
-    await bridge.exportGif()
+    await window.__spriteSheetSmoke.exportGif()
   })
 
   await waitFor(async () => {
@@ -255,16 +266,12 @@ try {
   })
 
   await window.evaluate(async (inputPath) => {
-    const bridge = globalThis.__spriteSheetSmoke
-    if (!bridge) {
-      throw new Error('Smoke bridge is unavailable before roundtrip GIF import.')
-    }
-    await bridge.importPaths([inputPath])
+    await window.__spriteSheetSmoke.importPaths([inputPath])
   }, gifOutputPath)
 
   const finalSnapshot = await waitFor(async () => {
-    const snapshot = await window.evaluate(() => window.__spriteSheetSmoke?.getSnapshot())
-    return snapshot?.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 11 ? snapshot : null
+    const snapshot = await window.evaluate(() => window.__spriteSheetSmoke.getSnapshot())
+    return snapshot.frameCount === 2 && snapshot.playback.fps >= 9 && snapshot.playback.fps <= 11 ? snapshot : null
   })
 
   await app.close()
@@ -281,7 +288,7 @@ try {
   }
 
   console.log(
-    `Electron regression passed: auto-detect ${autoDetectSnapshot.sheet.rows}x${autoDetectSnapshot.sheet.columns}, drawer/settings/export regressions, GIF roundtrip ${finalSnapshot.frameCount} frames @ ${finalSnapshot.playback.fps} FPS.`
+    `Electron regression passed: auto-detect ${autoDetectSnapshot.sheet.rows}x${autoDetectSnapshot.sheet.columns}, filename hint ${filenameHintSnapshot.sheet.rows}x${filenameHintSnapshot.sheet.columns}, drawer/settings/export regressions, GIF roundtrip ${finalSnapshot.frameCount} frames @ ${finalSnapshot.playback.fps} FPS.`
   )
 } finally {
   await app.close().catch(() => {})

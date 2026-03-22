@@ -62,6 +62,15 @@ interface ExportNotice {
   targetPath: string
 }
 
+interface SheetGeometryState {
+  canApply: boolean
+  columns: number
+  frameHeight: number
+  frameWidth: number
+  predictedFrameCount: number
+  rows: number
+}
+
 interface SmokeBridge {
   exportGif: () => Promise<void>
   exportSequence: () => Promise<void>
@@ -128,7 +137,7 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
   return target.isContentEditable || tagName === 'INPUT' || tagName === 'SELECT' || tagName === 'TEXTAREA'
 }
 
-const getSheetGeometry = (sheet: SheetState) => {
+const getSheetGeometry = (sheet: SheetState): SheetGeometryState => {
   if (!sheet.source || sheet.sourceWidth <= 0 || sheet.sourceHeight <= 0) {
     return {
       canApply: false,
@@ -325,6 +334,7 @@ export default function App() {
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null)
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => loadUiPreferences())
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
+  const [pendingSplitExportGeometry, setPendingSplitExportGeometry] = useState<SheetGeometryState | null>(null)
   const operationRef = useRef<OperationController | null>(null)
   const smokeFnsRef = useRef<SmokeBridge | null>(null)
   const drawerCloseTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
@@ -478,9 +488,10 @@ export default function App() {
     }))
   }
 
-  const openExportModal = useEffectEvent((options?: { collapseRightDrawer?: boolean }) => {
+  const openExportModal = useEffectEvent((options?: { collapseRightDrawer?: boolean; splitGeometry?: SheetGeometryState | null }) => {
     clearDrawerOpenTimer('right')
     clearDrawerCloseTimer('right')
+    setPendingSplitExportGeometry(options?.splitGeometry ?? null)
     if (options?.collapseRightDrawer !== false) {
       setDrawerOpen((state) => ({ ...state, right: false }))
     }
@@ -794,8 +805,9 @@ export default function App() {
     setStatusMessage(`已切换到候选网格 ${candidate.rows} x ${candidate.columns}。`)
   }
 
-  const handleApplySheet = async (): Promise<void> => {
-    if (!sheet.source || !sheetGeometry.canApply) {
+  const handleApplySheet = async (geometryOverride?: SheetGeometryState): Promise<void> => {
+    const geometry = geometryOverride ?? sheetGeometry
+    if (!sheet.source || !geometry.canApply) {
       return
     }
 
@@ -811,10 +823,10 @@ export default function App() {
       async (controller) => {
         const nextFrames = await splitSheetToFrames(
           source,
-          sheetGeometry.rows,
-          sheetGeometry.columns,
-          sheetGeometry.frameWidth,
-          sheetGeometry.frameHeight,
+          geometry.rows,
+          geometry.columns,
+          geometry.frameWidth,
+          geometry.frameHeight,
           async (progress) => {
             await updateOperationProgress(controller, progress)
           }
@@ -832,15 +844,15 @@ export default function App() {
           sheet: {
             ...sheet,
             autoApplied: false,
-            columns: sheetGeometry.columns,
+            columns: geometry.columns,
             enabled: true,
-            frameHeight: sheetGeometry.frameHeight,
-            frameWidth: sheetGeometry.frameWidth,
-            rows: sheetGeometry.rows
+            frameHeight: geometry.frameHeight,
+            frameWidth: geometry.frameWidth,
+            rows: geometry.rows
           }
         })
         setPingPongDirection(1)
-        setStatusMessage(`已按 ${sheetGeometry.rows} x ${sheetGeometry.columns} 拆分为 ${nextFrames.length} 帧。`)
+        setStatusMessage(`已按 ${geometry.rows} x ${geometry.columns} 拆分为 ${nextFrames.length} 帧。`)
       },
       '已取消拆分。'
     )
@@ -942,8 +954,9 @@ export default function App() {
     )
   }
 
-  const handleExportSplitSequence = async (): Promise<void> => {
-    if (!sheet.source || !sheetGeometry.canApply) {
+  const handleExportSplitSequence = async (geometryOverride?: SheetGeometryState): Promise<void> => {
+    const geometry = geometryOverride ?? pendingSplitExportGeometry ?? sheetGeometry
+    if (!sheet.source || !geometry.canApply) {
       return
     }
 
@@ -966,10 +979,10 @@ export default function App() {
       async (controller) => {
         const splitFrames = await splitSheetToFrames(
           source,
-          sheetGeometry.rows,
-          sheetGeometry.columns,
-          sheetGeometry.frameWidth,
-          sheetGeometry.frameHeight,
+          geometry.rows,
+          geometry.columns,
+          geometry.frameWidth,
+          geometry.frameHeight,
           async (progress) => {
             await updateOperationProgress(controller, progress)
           }
@@ -979,6 +992,7 @@ export default function App() {
         await exportFramesToDirectory(directory, splitFrames, 'export-split-sequence', controller, writtenPaths)
         setStatusMessage(`已导出 ${splitFrames.length} 张拆分图片到 ${directory}`)
         showExportNotice('拆分导出完成', directory)
+        setPendingSplitExportGeometry(null)
       },
       {
         cancelledMessage: writtenPaths.length > 0 ? '已取消拆分导出，并清理已写出的文件。' : '已取消拆分导出。',
@@ -1107,6 +1121,7 @@ export default function App() {
     clearWindowDragState()
     setExportNotice(null)
     setIsExportPanelOpen(false)
+    setPendingSplitExportGeometry(null)
     setPingPongDirection(1)
     resetWorkspace()
   }
@@ -1492,12 +1507,12 @@ export default function App() {
                 frameHeight={sheetGeometry.frameHeight}
                 frameWidth={sheetGeometry.frameWidth}
                 isBusy={isBusy}
-                onApply={() => {
-                  void handleApplySheet()
+                onApply={(geometry) => {
+                  void handleApplySheet(geometry)
                 }}
                 onChooseCandidate={handleChooseCandidate}
-                onExportSplitSequence={() => {
-                  openExportModal()
+                onExportSplitSequence={(geometry) => {
+                  openExportModal({ splitGeometry: geometry })
                 }}
                 onUpdateSheet={handleUpdateSheet}
                 predictedFrameCount={sheetGeometry.predictedFrameCount}
@@ -1750,12 +1765,17 @@ export default function App() {
                   void handleExportSequence()
                 }}
                 onExportSplitSequence={() => {
-                  void handleExportSplitSequence()
+                  void handleExportSplitSequence(pendingSplitExportGeometry ?? sheetGeometry)
                 }}
                 onExportSheet={() => {
                   void handleExportSheet()
                 }}
-                onOpenChange={setIsExportPanelOpen}
+                onOpenChange={(open) => {
+                  setIsExportPanelOpen(open)
+                  if (!open) {
+                    setPendingSplitExportGeometry(null)
+                  }
+                }}
                 onUpdateExport={updateExportSettings}
                 recommendedLayout={recommendedLayout}
               />

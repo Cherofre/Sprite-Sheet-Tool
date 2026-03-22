@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type CSSProperties, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { buildSplitPreviewSampleIndices } from '@features/split/preview'
@@ -23,6 +23,7 @@ interface PreviewThumb {
 
 interface ActivePreview {
   dataUrl: string
+  overlayStyle?: CSSProperties
   title: string
 }
 
@@ -128,6 +129,7 @@ export function SplitPreview({
 
               <div className="split-preview-modal-body">
                 <img alt={activePreview.title} className="split-preview-modal-image" src={activePreview.dataUrl} />
+                {activePreview.overlayStyle ? <div className="split-preview-modal-overlay" style={activePreview.overlayStyle} /> : null}
               </div>
             </div>
           </div>,
@@ -145,7 +147,13 @@ export function SplitPreview({
 
         <button
           className="sheet-preview-stage split-preview-stage-button"
-          onClick={() => setActivePreview({ dataUrl: source.dataUrl, title: `${source.name} 拆分总览` })}
+          onClick={() =>
+            setActivePreview({
+              dataUrl: source.dataUrl,
+              overlayStyle,
+              title: `${source.name} 拆分总览`
+            })
+          }
           type="button"
         >
           <img alt={source.name} className="sheet-preview-image" src={source.dataUrl} />

@@ -34,14 +34,11 @@ const buildSheetState = async (payload: ImportedFilePayload, onProgress?: Progre
   const hintedCandidate = detectGridHintFromName(payload.name, width, height)
   const heuristicCandidates = detectRegularGrid(width, height)
   const rankedHeuristicCandidates = rankGridCandidatesWithInkProfiles(heuristicCandidates, inspection)
-  const candidates = [hintedCandidate, ...rankedHeuristicCandidates]
-    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
-    .filter(
-      (candidate, index, list) =>
-        list.findIndex((item) => item.rows === candidate.rows && item.columns === candidate.columns) === index
-    )
-    .sort((left, right) => right.score - left.score)
-  const bestCandidate = candidates[0]
+  const dedupedHeuristicCandidates = rankedHeuristicCandidates.filter(
+    (candidate) => !hintedCandidate || candidate.rows !== hintedCandidate.rows || candidate.columns !== hintedCandidate.columns
+  )
+  const candidates = hintedCandidate ? [hintedCandidate, ...dedupedHeuristicCandidates] : dedupedHeuristicCandidates
+  const bestCandidate = hintedCandidate ?? candidates[0]
   const autoApply = Boolean(hintedCandidate) || shouldAutoApplyGrid(candidates)
 
   const sheet: SheetState = {
