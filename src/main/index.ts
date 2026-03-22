@@ -52,6 +52,11 @@ const createMainWindow = async (): Promise<void> => {
 }
 
 app.whenReady().then(async () => {
+  app.setName(APP_NAME)
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.codex.spritesheettool')
+  }
+
   if (process.platform !== 'darwin') {
     Menu.setApplicationMenu(null)
   }

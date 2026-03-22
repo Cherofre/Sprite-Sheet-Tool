@@ -10,6 +10,7 @@ import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskSchedu
 import type {
   ComposeSheetWorkerResult,
   DecodeGifWorkerResult,
+  ImageInspectionResult,
   ImageWorkerRequest,
   ImageWorkerResponse
 } from './imageWorkerTypes'
@@ -64,6 +65,92 @@ const postProgress = async (id: string, progress: TaskProgress) => {
     progress,
     type: 'progress'
   } satisfies ImageWorkerResponse)
+}
+
+const inspectImageInWorker = async (
+  payload: ImportedFilePayload,
+  maxSampleSize = 384
+): Promise<ImageInspectionResult> => {
+  const image = await loadBitmap(payload.dataUrl)
+  const scale = Math.min(1, maxSampleSize / Math.max(image.width, image.height))
+  const sampleWidth = Math.max(32, Math.round(image.width * scale))
+  const sampleHeight = Math.max(32, Math.round(image.height * scale))
+  const canvas = createCanvas(sampleWidth, sampleHeight)
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) {
+    throw new Error('Canvas is unavailable')
+  }
+
+  context.clearRect(0, 0, sampleWidth, sampleHeight)
+  context.drawImage(image, 0, 0, sampleWidth, sampleHeight)
+
+  const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight)
+  const columnInk = new Array<number>(sampleWidth).fill(0)
+  const rowInk = new Array<number>(sampleHeight).fill(0)
+  const inkMap = new Array<number>(sampleWidth * sampleHeight).fill(0)
+  let totalInk = 0
+
+  for (let y = 0; y < sampleHeight; y += 1) {
+    for (let x = 0; x < sampleWidth; x += 1) {
+      const index = (y * sampleWidth + x) * 4
+      const alpha = data[index + 3] / 255
+      const brightness = (data[index] + data[index + 1] + data[index + 2]) / (255 * 3)
+      const ink = (1 - brightness) * alpha
+
+      columnInk[x] += ink
+      rowInk[y] += ink
+      inkMap[y * sampleWidth + x] = ink
+      totalInk += ink
+    }
+  }
+
+  return {
+    columnInk: columnInk.map((value) => value / sampleHeight),
+    height: image.height,
+    inkMap,
+    meanInk: totalInk / (sampleWidth * sampleHeight),
+    rowInk: rowInk.map((value) => value / sampleWidth),
+    sampleHeight,
+    sampleWidth,
+    width: image.width
+  }
+}
+
+const convertPayloadsToFramesInWorker = async (
+  id: string,
+  payloads: ImportedFilePayload[],
+  sourceType: FrameItem['sourceType']
+): Promise<FrameItem[]> => {
+  const frames: FrameItem[] = []
+
+  for (let index = 0; index < payloads.length; index += 1) {
+    const payload = payloads[index]
+    const image = await loadBitmap(payload.dataUrl)
+
+    frames.push({
+      dataUrl: payload.dataUrl,
+      height: image.height,
+      id: crypto.randomUUID(),
+      name: stripExtension(payload.name),
+      sourcePath: payload.path,
+      sourceType,
+      width: image.width
+    })
+
+    const processed = index + 1
+    if (shouldReportProgress(processed, payloads.length)) {
+      await postProgress(id, {
+        current: processed,
+        percent: (processed / payloads.length) * 100,
+        stage: 'convert-files',
+        total: payloads.length
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
+  }
+
+  return frames
 }
 
 const splitSheetInWorker = async (
@@ -333,7 +420,7 @@ workerScope.addEventListener('message', async (event: MessageEvent<ImageWorkerRe
   const request = event.data
 
   try {
-    let result: ComposeSheetWorkerResult | DecodeGifWorkerResult | FrameItem[] | Uint8Array
+    let result: ComposeSheetWorkerResult | DecodeGifWorkerResult | FrameItem[] | ImageInspectionResult | Uint8Array
 
     switch (request.kind) {
       case 'split-sheet':
@@ -357,6 +444,12 @@ workerScope.addEventListener('message', async (event: MessageEvent<ImageWorkerRe
         break
       case 'encode-gif':
         result = await encodeGifInWorker(request.id, request.frames, request.fps)
+        break
+      case 'inspect-image':
+        result = await inspectImageInWorker(request.payload, request.maxSampleSize)
+        break
+      case 'convert-payloads-to-frames':
+        result = await convertPayloadsToFramesInWorker(request.id, request.payloads, request.sourceType)
         break
       default:
         throw new Error('Unknown image worker task')

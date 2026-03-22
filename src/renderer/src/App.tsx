@@ -45,7 +45,22 @@ interface OperationConfig {
 }
 
 interface SmokeBridge {
+  exportGif: () => Promise<void>
   exportSequence: () => Promise<void>
+  getSnapshot: () => {
+    frameCount: number
+    playback: {
+      currentFrame: number
+      fps: number
+      isPlaying: boolean
+    }
+    sheet: {
+      autoApplied: boolean
+      columns: number
+      enabled: boolean
+      rows: number
+    }
+  }
   importPaths: (paths: string[]) => Promise<void>
 }
 
@@ -1033,18 +1048,49 @@ export default function App() {
     }
   }, [clearWindowDragState, handleWindowDrop, isBusy, isWindowDragActive])
 
-  useEffect(() => {
-    smokeFnsRef.current = {
-      exportSequence: handleExportSequence,
-      importPaths
-    }
-  })
+  smokeFnsRef.current = {
+    exportGif: handleExportGif,
+    exportSequence: handleExportSequence,
+    getSnapshot: () => ({
+      frameCount: frames.length,
+      playback: {
+        currentFrame: playback.currentFrame,
+        fps: playback.fps,
+        isPlaying: playback.isPlaying
+      },
+      sheet: {
+        autoApplied: sheet.autoApplied,
+        columns: sheet.columns,
+        enabled: sheet.enabled,
+        rows: sheet.rows
+      }
+    }),
+    importPaths
+  }
 
   useEffect(() => {
     const bridge: SmokeBridge = {
+      exportGif: async () => {
+        await smokeFnsRef.current?.exportGif()
+      },
       exportSequence: async () => {
         await smokeFnsRef.current?.exportSequence()
       },
+      getSnapshot: () =>
+        smokeFnsRef.current?.getSnapshot() ?? {
+          frameCount: 0,
+          playback: {
+            currentFrame: 0,
+            fps: 0,
+            isPlaying: false
+          },
+          sheet: {
+            autoApplied: false,
+            columns: 0,
+            enabled: false,
+            rows: 0
+          }
+        },
       importPaths: async (paths) => {
         await smokeFnsRef.current?.importPaths(paths)
       }

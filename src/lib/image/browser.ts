@@ -4,7 +4,7 @@ import { stripExtension } from '@lib/fs/fileNames'
 import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
 import { runImageWorkerTask, supportsImageWorker } from '@lib/image/worker.client'
 
-import type { ComposeSheetWorkerResult } from './imageWorkerTypes'
+import type { ComposeSheetWorkerResult, ImageInspectionResult } from './imageWorkerTypes'
 
 const MIME_BY_FORMAT: Record<ExportImageFormat, string> = {
   jpeg: 'image/jpeg',
@@ -33,8 +33,11 @@ export const sampleImageInkProfiles = async (
   maxSampleSize = 384
 ): Promise<{
   columnInk: number[]
+  inkMap?: number[]
   meanInk: number
   rowInk: number[]
+  sampleHeight?: number
+  sampleWidth?: number
 }> => {
   const image = await loadImageElement(dataUrl)
   const scale = Math.min(1, maxSampleSize / Math.max(image.naturalWidth, image.naturalHeight))
@@ -54,6 +57,7 @@ export const sampleImageInkProfiles = async (
 
   const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight)
   const columnInk = new Array<number>(sampleWidth).fill(0)
+  const inkMap = new Array<number>(sampleWidth * sampleHeight).fill(0)
   const rowInk = new Array<number>(sampleHeight).fill(0)
   let totalInk = 0
 
@@ -65,6 +69,7 @@ export const sampleImageInkProfiles = async (
       const ink = (1 - brightness) * alpha
 
       columnInk[x] += ink
+      inkMap[y * sampleWidth + x] = ink
       rowInk[y] += ink
       totalInk += ink
     }
@@ -75,8 +80,46 @@ export const sampleImageInkProfiles = async (
 
   return {
     columnInk: normalizedColumnInk,
+    inkMap,
     meanInk: totalInk / (sampleWidth * sampleHeight),
-    rowInk: normalizedRowInk
+    rowInk: normalizedRowInk,
+    sampleHeight,
+    sampleWidth
+  }
+}
+
+export const inspectImage = async (
+  payload: ImportedFilePayload,
+  maxSampleSize = 384
+): Promise<ImageInspectionResult> => {
+  if (supportsImageWorker()) {
+    try {
+      return await runImageWorkerTask<ImageInspectionResult>(
+        {
+          kind: 'inspect-image',
+          maxSampleSize,
+          payload
+        }
+      )
+    } catch {
+      // Fall through to the renderer path when workers are unavailable or fail.
+    }
+  }
+
+  const [{ height, width }, profiles] = await Promise.all([
+    measureImage(payload.dataUrl),
+    sampleImageInkProfiles(payload.dataUrl, maxSampleSize)
+  ])
+
+  return {
+    columnInk: profiles.columnInk,
+    height,
+    inkMap: profiles.inkMap ?? [],
+    meanInk: profiles.meanInk,
+    rowInk: profiles.rowInk,
+    sampleHeight: profiles.sampleHeight ?? 0,
+    sampleWidth: profiles.sampleWidth ?? 0,
+    width
   }
 }
 
@@ -136,6 +179,52 @@ export const filePayloadToFrame = async (
     sourceType,
     width
   }
+}
+
+export const convertPayloadsToFrames = async (
+  payloads: ImportedFilePayload[],
+  sourceType: FrameItem['sourceType'] = 'file',
+  onProgress?: ProgressCallback
+): Promise<FrameItem[]> => {
+  if (payloads.length === 0) {
+    return []
+  }
+
+  if (supportsImageWorker()) {
+    try {
+      return await runImageWorkerTask<FrameItem[]>(
+        {
+          kind: 'convert-payloads-to-frames',
+          payloads,
+          sourceType
+        },
+        onProgress
+      )
+    } catch {
+      // Fall through to the renderer path when workers are unavailable or fail.
+    }
+  }
+
+  const frames: FrameItem[] = []
+
+  for (let index = 0; index < payloads.length; index += 1) {
+    const payload = payloads[index]
+    frames.push(await filePayloadToFrame(payload, sourceType))
+
+    const processed = index + 1
+    if (onProgress && shouldReportProgress(processed, payloads.length)) {
+      await onProgress({
+        current: processed,
+        percent: (processed / payloads.length) * 100,
+        stage: 'convert-files',
+        total: payloads.length
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
+  }
+
+  return frames
 }
 
 const splitSheetToFramesInRenderer = async (

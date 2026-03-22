@@ -29,17 +29,32 @@ export const runImageWorkerTask = async<T>(
   const id = crypto.randomUUID()
 
   return new Promise<T>((resolve, reject) => {
-    worker.addEventListener('message', async (event: MessageEvent<ImageWorkerResponse>) => {
+    let settled = false
+
+    const settleError = (error: unknown) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      worker.terminate()
+      reject(error instanceof Error ? error : new Error('Image worker failed'))
+    }
+
+    worker.addEventListener('message', (event: MessageEvent<ImageWorkerResponse>) => {
       const message = event.data
-      if (message.id !== id) {
+      if (settled || message.id !== id) {
         return
       }
 
       if (message.type === 'progress') {
-        await onProgress?.(message.progress)
+        void Promise.resolve(onProgress?.(message.progress)).catch(() => {
+          // Ignore late progress callbacks after the task has effectively finished.
+        })
         return
       }
 
+      settled = true
       worker.terminate()
 
       if (message.type === 'error') {
@@ -51,8 +66,7 @@ export const runImageWorkerTask = async<T>(
     })
 
     worker.addEventListener('error', (event) => {
-      worker.terminate()
-      reject(event.error instanceof Error ? event.error : new Error('Image worker failed'))
+      settleError(event.error)
     })
 
     worker.postMessage({

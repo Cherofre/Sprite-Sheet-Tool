@@ -11,6 +11,17 @@ export interface DecodeGifWorkerResult {
   frames: FrameItem[]
 }
 
+export interface ImageInspectionResult {
+  columnInk: number[]
+  height: number
+  inkMap: number[]
+  meanInk: number
+  rowInk: number[]
+  sampleHeight: number
+  sampleWidth: number
+  width: number
+}
+
 export type ImageWorkerRequest =
   | {
       columns: number
@@ -45,6 +56,18 @@ export type ImageWorkerRequest =
       id: string
       kind: 'encode-gif'
     }
+  | {
+      id: string
+      kind: 'inspect-image'
+      maxSampleSize?: number
+      payload: ImportedFilePayload
+    }
+  | {
+      id: string
+      kind: 'convert-payloads-to-frames'
+      payloads: ImportedFilePayload[]
+      sourceType: FrameItem['sourceType']
+    }
 
 export type ImageWorkerResponse =
   | {
@@ -59,6 +82,6 @@ export type ImageWorkerResponse =
     }
   | {
       id: string
-      result: ComposeSheetWorkerResult | DecodeGifWorkerResult | FrameItem[] | Uint8Array
+      result: ComposeSheetWorkerResult | DecodeGifWorkerResult | FrameItem[] | ImageInspectionResult | Uint8Array
       type: 'result'
     }

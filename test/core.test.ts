@@ -4,7 +4,13 @@ import { buildExportFileName, buildSampledIndices } from '@features/export/plans
 import { recommendSheetLayout } from '@features/merge/layout'
 import { advanceSequencePosition, buildFrameSequence } from '@features/preview/frameSequence'
 import { buildSplitPreviewSampleIndices } from '@features/split/preview'
-import { detectGridHintFromName, detectRegularGrid, scoreCandidateWithInkProfiles } from '@lib/grid/detectRegularGrid'
+import {
+  detectGridHintFromName,
+  detectRegularGrid,
+  rankGridCandidatesWithInkProfiles,
+  scoreCandidateWithCellCenters,
+  scoreCandidateWithInkProfiles
+} from '@lib/grid/detectRegularGrid'
 import { naturalSort } from '@lib/sort/naturalSort'
 
 describe('naturalSort', () => {
@@ -54,6 +60,110 @@ describe('scoreCandidateWithInkProfiles', () => {
     )
 
     expect(aligned).toBeGreaterThan(misaligned)
+  })
+})
+
+describe('scoreCandidateWithCellCenters', () => {
+  it('prefers a grid whose cell centers look like full frames instead of partial tiles', () => {
+    const sampleWidth = 16
+    const sampleHeight = 16
+    const inkMap = new Array<number>(sampleWidth * sampleHeight).fill(0.01)
+
+    for (let cellRow = 0; cellRow < 4; cellRow += 1) {
+      for (let cellColumn = 0; cellColumn < 4; cellColumn += 1) {
+        for (let y = cellRow * 4 + 1; y <= cellRow * 4 + 2; y += 1) {
+          for (let x = cellColumn * 4 + 1; x <= cellColumn * 4 + 2; x += 1) {
+            inkMap[y * sampleWidth + x] = 0.92
+          }
+        }
+      }
+    }
+
+    const aligned = scoreCandidateWithCellCenters(
+      {
+        columns: 4,
+        rows: 4
+      },
+      {
+        columnInk: new Array(sampleWidth).fill(0.2),
+        inkMap,
+        meanInk: 0.18,
+        rowInk: new Array(sampleHeight).fill(0.2),
+        sampleHeight,
+        sampleWidth
+      }
+    )
+
+    const overlyFine = scoreCandidateWithCellCenters(
+      {
+        columns: 8,
+        rows: 8
+      },
+      {
+        columnInk: new Array(sampleWidth).fill(0.2),
+        inkMap,
+        meanInk: 0.18,
+        rowInk: new Array(sampleHeight).fill(0.2),
+        sampleHeight,
+        sampleWidth
+      }
+    )
+
+    expect(aligned).toBeGreaterThan(overlyFine)
+  })
+})
+
+describe('rankGridCandidatesWithInkProfiles', () => {
+  it('uses center occupancy to keep the correct 4x4 candidate above a noisier 8x8 split', () => {
+    const sampleWidth = 16
+    const sampleHeight = 16
+    const inkMap = new Array<number>(sampleWidth * sampleHeight).fill(0.01)
+
+    for (let cellRow = 0; cellRow < 4; cellRow += 1) {
+      for (let cellColumn = 0; cellColumn < 4; cellColumn += 1) {
+        for (let y = cellRow * 4 + 1; y <= cellRow * 4 + 2; y += 1) {
+          for (let x = cellColumn * 4 + 1; x <= cellColumn * 4 + 2; x += 1) {
+            inkMap[y * sampleWidth + x] = 0.92
+          }
+        }
+      }
+    }
+
+    const ranked = rankGridCandidatesWithInkProfiles(
+      [
+        {
+          columns: 8,
+          confidence: 0.72,
+          frameHeight: 32,
+          frameWidth: 32,
+          label: '8 x 8 grid (32 x 32)',
+          rows: 8,
+          score: 0.84
+        },
+        {
+          columns: 4,
+          confidence: 0.69,
+          frameHeight: 64,
+          frameWidth: 64,
+          label: '4 x 4 grid (64 x 64)',
+          rows: 4,
+          score: 0.78
+        }
+      ],
+      {
+        columnInk: new Array(sampleWidth).fill(0.2),
+        inkMap,
+        meanInk: 0.18,
+        rowInk: new Array(sampleHeight).fill(0.2),
+        sampleHeight,
+        sampleWidth
+      }
+    )
+
+    expect(ranked[0]).toMatchObject({
+      columns: 4,
+      rows: 4
+    })
   })
 })
 

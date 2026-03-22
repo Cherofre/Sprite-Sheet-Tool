@@ -10,7 +10,7 @@ import {
   shouldAutoApplyGrid
 } from '@lib/grid/detectRegularGrid'
 import { decodeGifToFrames } from '@lib/image/gif'
-import { filePayloadToFrame, measureImage, sampleImageInkProfiles, splitSheetToFrames } from '@lib/image/browser'
+import { convertPayloadsToFrames, filePayloadToFrame, inspectImage, splitSheetToFrames } from '@lib/image/browser'
 import { naturalSort } from '@lib/sort/naturalSort'
 
 export interface ImportSession {
@@ -24,7 +24,8 @@ const buildSheetState = async (payload: ImportedFilePayload, onProgress?: Progre
     percent: 10,
     stage: 'measure-sheet'
   })
-  const { height, width } = await measureImage(payload.dataUrl)
+  const inspection = await inspectImage(payload)
+  const { height, width } = inspection
 
   await onProgress?.({
     percent: 25,
@@ -32,8 +33,7 @@ const buildSheetState = async (payload: ImportedFilePayload, onProgress?: Progre
   })
   const hintedCandidate = detectGridHintFromName(payload.name, width, height)
   const heuristicCandidates = detectRegularGrid(width, height)
-  const contentProfiles = await sampleImageInkProfiles(payload.dataUrl)
-  const rankedHeuristicCandidates = rankGridCandidatesWithInkProfiles(heuristicCandidates, contentProfiles)
+  const rankedHeuristicCandidates = rankGridCandidatesWithInkProfiles(heuristicCandidates, inspection)
   const candidates = [hintedCandidate, ...rankedHeuristicCandidates]
     .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
     .filter(
@@ -133,6 +133,28 @@ export const buildImportSession = async (
     }
 
     return buildSheetState(singlePayload, onProgress)
+  }
+
+  if (sortedPayloads.every((payload) => payload.extension !== 'gif')) {
+    const frames = await convertPayloadsToFrames(sortedPayloads, 'file', async (progress) => {
+      await onProgress?.({
+        current: progress.current,
+        percent: 15 + ((progress.percent ?? 0) * 0.85),
+        stage: 'convert-files',
+        total: progress.total
+      })
+    })
+
+    return {
+      frames,
+      playback: {
+        ...DEFAULT_PLAYBACK,
+        currentFrame: 0,
+        endFrame: Math.max(0, frames.length - 1),
+        isPlaying: frames.length > 1
+      },
+      sheet: createEmptySheetState()
+    }
   }
 
   const frameGroups: Awaited<ReturnType<typeof filePayloadToFrame>>[][] = []

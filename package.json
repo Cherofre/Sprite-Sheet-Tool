@@ -2,14 +2,20 @@
   "name": "sprite-sheet-tool",
   "version": "0.0.1",
   "private": true,
+  "author": "OpenAI Codex",
   "description": "Desktop sprite sheet and frame animation tool for game VFX artists.",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "icon:generate": "node scripts/generate-icons.mjs",
     "lint": "eslint . --max-warnings=0",
-    "package:portable": "npm run build && electron-builder --win portable --publish never",
+    "package:nsis": "npm run build && npm run icon:generate && npm run sign:report && electron-builder --win nsis --publish never -c.artifactName=${productName}-${version}-setup.${ext}",
+    "package:portable": "npm run build && npm run icon:generate && npm run sign:report && electron-builder --win portable --publish never -c.artifactName=${productName}-${version}-portable.${ext}",
+    "package:win": "npm run package:portable && npm run package:nsis",
+    "regression:e2e": "node scripts/electron-regression.mjs",
+    "sign:report": "node scripts/report-signing.mjs",
     "smoke": "node scripts/electron-smoke.mjs",
     "start:built": "electron .",
     "typecheck": "tsc --noEmit",
@@ -40,6 +46,8 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.4.0",
     "playwright": "^1.58.2",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.44.1",
     "vite": "^7.1.7",
@@ -48,8 +56,8 @@
   "build": {
     "appId": "com.codex.spritesheettool",
     "asar": true,
-    "artifactName": "${productName}-${version}-portable.${ext}",
     "directories": {
+      "buildResources": "build",
       "output": "release"
     },
     "files": [
@@ -59,6 +67,7 @@
     "npmRebuild": false,
     "productName": "Sprite Sheet Tool",
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "portable",
@@ -67,6 +76,15 @@
           ]
         }
       ]
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "build/installerIcon.ico",
+      "oneClick": false,
+      "shortcutName": "Sprite Sheet Tool",
+      "uninstallerIcon": "build/uninstallerIcon.ico"
     }
   }
 }

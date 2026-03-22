@@ -4,6 +4,7 @@ import type { GridCandidate } from '@shared/types'
 const COMMON_SQUARE_GRIDS = new Set([2, 3, 4, 5, 6, 8, 10, 12, 16])
 const GRID_HINT_PATTERN = /(\d{1,2})\s*[xX*]\s*(\d{1,2})/
 const EPSILON = 0.0001
+const MAX_AUTO_DIVISIONS = 24
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value))
 
@@ -62,9 +63,14 @@ const buildGridCandidate = (
 
 export const detectRegularGrid = (sourceWidth: number, sourceHeight: number, maxDivisions = 16): GridCandidate[] => {
   const candidates: GridCandidate[] = []
+  const adaptiveDivisions = clamp(
+    Math.floor(Math.min(sourceWidth, sourceHeight) / 16),
+    maxDivisions,
+    MAX_AUTO_DIVISIONS
+  )
 
-  for (let rows = 1; rows <= maxDivisions; rows += 1) {
-    for (let columns = 1; columns <= maxDivisions; columns += 1) {
+  for (let rows = 1; rows <= adaptiveDivisions; rows += 1) {
+    for (let columns = 1; columns <= adaptiveDivisions; columns += 1) {
       const candidate = buildGridCandidate(rows, columns, sourceWidth, sourceHeight)
       if (candidate) {
         candidates.push(candidate)
@@ -77,8 +83,11 @@ export const detectRegularGrid = (sourceWidth: number, sourceHeight: number, max
 
 export interface InkProfiles {
   columnInk: number[]
+  inkMap?: number[]
   meanInk: number
   rowInk: number[]
+  sampleHeight?: number
+  sampleWidth?: number
 }
 
 const averageBand = (values: number[], center: number, radius: number): number => {
@@ -127,6 +136,37 @@ const scoreProfileAxis = (profile: number[], segments: number, meanInk: number):
   return boundaryGap * 0.75 + Math.max(0, centerDensity) * 0.25
 }
 
+const sampleRegionAverage = (
+  inkMap: number[],
+  sampleWidth: number,
+  sampleHeight: number,
+  startX: number,
+  endX: number,
+  startY: number,
+  endY: number
+): number => {
+  const clampedStartX = clamp(Math.floor(startX), 0, sampleWidth - 1)
+  const clampedEndX = clamp(Math.ceil(endX), 0, sampleWidth - 1)
+  const clampedStartY = clamp(Math.floor(startY), 0, sampleHeight - 1)
+  const clampedEndY = clamp(Math.ceil(endY), 0, sampleHeight - 1)
+
+  if (clampedEndX < clampedStartX || clampedEndY < clampedStartY) {
+    return 0
+  }
+
+  let total = 0
+  let count = 0
+
+  for (let y = clampedStartY; y <= clampedEndY; y += 1) {
+    for (let x = clampedStartX; x <= clampedEndX; x += 1) {
+      total += inkMap[y * sampleWidth + x] ?? 0
+      count += 1
+    }
+  }
+
+  return count > 0 ? total / count : 0
+}
+
 export const scoreCandidateWithInkProfiles = (
   candidate: Pick<GridCandidate, 'columns' | 'rows'>,
   profiles: InkProfiles
@@ -138,14 +178,59 @@ export const scoreCandidateWithInkProfiles = (
   return clamp(combined, -1, 2) * 0.6
 }
 
+export const scoreCandidateWithCellCenters = (
+  candidate: Pick<GridCandidate, 'columns' | 'rows'>,
+  profiles: InkProfiles
+): number => {
+  const { inkMap = [], meanInk, sampleHeight = 0, sampleWidth = 0 } = profiles
+  if (inkMap.length === 0 || sampleWidth <= 0 || sampleHeight <= 0) {
+    return 0
+  }
+
+  const cellWidth = sampleWidth / candidate.columns
+  const cellHeight = sampleHeight / candidate.rows
+  if (cellWidth < 3 || cellHeight < 3) {
+    return 0
+  }
+
+  const centerValues: number[] = []
+
+  for (let row = 0; row < candidate.rows; row += 1) {
+    for (let column = 0; column < candidate.columns; column += 1) {
+      const startX = column * cellWidth + cellWidth * 0.28
+      const endX = column * cellWidth + cellWidth * 0.72
+      const startY = row * cellHeight + cellHeight * 0.28
+      const endY = row * cellHeight + cellHeight * 0.72
+
+      centerValues.push(sampleRegionAverage(inkMap, sampleWidth, sampleHeight, startX, endX, startY, endY))
+    }
+  }
+
+  if (centerValues.length === 0) {
+    return 0
+  }
+
+  const activationThreshold = Math.max(meanInk * 0.42, 0.018)
+  const activeRatio = centerValues.filter((value) => value >= activationThreshold).length / centerValues.length
+  const meanCenterInk = centerValues.reduce((total, value) => total + value, 0) / centerValues.length
+  const variance =
+    centerValues.reduce((total, value) => total + (value - meanCenterInk) ** 2, 0) / centerValues.length
+  const normalizedDeviation = Math.sqrt(variance) / Math.max(meanCenterInk, EPSILON)
+  const consistency = 1 - clamp(normalizedDeviation, 0, 1)
+  const density = clamp((meanCenterInk - activationThreshold) / Math.max(meanInk, 0.02), -1, 2)
+
+  return activeRatio * 0.26 + Math.max(0, consistency) * 0.18 + Math.max(0, density) * 0.16
+}
+
 export const rankGridCandidatesWithInkProfiles = (
   candidates: GridCandidate[],
   profiles: InkProfiles
 ): GridCandidate[] =>
   candidates
     .map((candidate) => {
-      const scoreBoost = scoreCandidateWithInkProfiles(candidate, profiles)
-      const score = candidate.score + scoreBoost
+      const boundaryScore = scoreCandidateWithInkProfiles(candidate, profiles)
+      const centerScore = scoreCandidateWithCellCenters(candidate, profiles)
+      const score = candidate.score + boundaryScore + centerScore
       const confidence = clamp(score / 1.15, 0, 0.99)
 
       return {
