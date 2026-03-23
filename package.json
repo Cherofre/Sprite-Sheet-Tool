@@ -13,8 +13,10 @@
     "icon:generate": "node scripts/generate-icons.mjs",
     "lint": "eslint . --max-warnings=0",
     "package:nsis": "npm run build && npm run icon:generate && npm run sign:report && electron-builder --win nsis --publish never -c.artifactName=${productName}-${version}-setup.${ext}",
-    "package:portable": "npm run build && npm run icon:generate && npm run sign:report && electron-builder --win portable --publish never -c.artifactName=${productName}-${version}-portable.${ext}",
+    "package:portable": "npm run build && npm run icon:generate && npm run sign:report && electron-builder --win zip --x64 --publish never -c.artifactName=${productName}-${version}-portable-dir.${ext}",
+    "package:portable:single": "npm run build && npm run icon:generate && npm run sign:report && electron-builder --win portable --x64 --publish never -c.artifactName=${productName}-${version}-portable-single.${ext}",
     "package:win": "npm run package:portable && npm run package:nsis",
+    "package:win:all": "npm run package:portable && npm run package:portable:single && npm run package:nsis",
     "regression:e2e": "node scripts/electron-regression.mjs",
     "sign:report": "node scripts/report-signing.mjs",
     "smoke": "node scripts/electron-smoke.mjs",
@@ -72,12 +74,21 @@
       "icon": "build/icon.ico",
       "target": [
         {
-          "target": "portable",
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ]
+    },
+    "portable": {
+      "unpackDirName": "SpriteSheetToolPortable"
     },
     "nsis": {
       "allowToChangeInstallationDirectory": true,
