@@ -881,6 +881,7 @@ label {
 .sheet-panel {
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 .sheet-panel-scroll {
@@ -902,6 +903,49 @@ label {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   z-index: 10;
   box-shadow: 0 -8px 16px rgba(0, 0, 0, 0.2);
+}
+
+.sheet-floating-notice {
+  position: absolute;
+  right: 0.8rem;
+  left: 0.8rem;
+  bottom: 4.7rem;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(255, 138, 77, 0.24);
+  border-radius: var(--radius-md);
+  background: rgba(24, 27, 32, 0.94);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.sheet-floating-notice strong {
+  color: #fff;
+  font-size: 0.76rem;
+}
+
+.sheet-floating-notice span {
+  color: var(--text-dim);
+  font-size: 0.73rem;
+  line-height: 1.35;
+}
+
+.sheet-floating-notice-invalid {
+  border-color: rgba(255, 208, 118, 0.26);
+}
+
+.sheet-floating-notice-invalid strong {
+  color: #ffe8b3;
+}
+
+.sheet-floating-notice-pending strong,
+.sheet-floating-notice-unapplied strong {
+  color: #ffd8c5;
 }
 
 .split-sample-grid {

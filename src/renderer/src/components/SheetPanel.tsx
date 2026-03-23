@@ -295,13 +295,6 @@ export function SheetPanel({
           </p>
         </div>
 
-        {applyNotice ? (
-          <div className={`hint-card slim-status sheet-apply-notice sheet-apply-notice-${applyState}`}>
-            <span className="eyebrow">{applyNotice.title}</span>
-            <span>{applyNotice.body}</span>
-          </div>
-        ) : null}
-
         <div className="toggle-group">
           <button
             className={draft.mode === 'grid' ? 'toggle-button active' : 'toggle-button'}
@@ -431,6 +424,17 @@ export function SheetPanel({
           </div>
         ) : null}
       </div>
+
+      {applyNotice ? (
+        <div
+          aria-live="polite"
+          className={`sheet-floating-notice sheet-floating-notice-${applyState}`}
+          role="status"
+        >
+          <strong>{applyNotice.title}</strong>
+          <span>{applyNotice.body}</span>
+        </div>
+      ) : null}
 
       <div className="sheet-action-bar">
         <div className="button-grid">
