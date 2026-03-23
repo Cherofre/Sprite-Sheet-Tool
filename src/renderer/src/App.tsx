@@ -151,6 +151,15 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
   return target.isContentEditable || tagName === 'INPUT' || tagName === 'SELECT' || tagName === 'TEXTAREA'
 }
 
+const isDrawerStickyFocusTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  const tagName = target.tagName
+  return tagName === 'INPUT' || tagName === 'SELECT' || tagName === 'TEXTAREA'
+}
+
 const getSheetGeometry = (sheet: SheetState): SheetGeometryState => {
   if (!sheet.source || sheet.sourceWidth <= 0 || sheet.sourceHeight <= 0) {
     return {
@@ -646,6 +655,12 @@ export default function App() {
       return
     }
 
+    const drawerElement = drawerRefs.current[side]
+    const activeElement = document.activeElement
+    if (drawerElement && isDrawerStickyFocusTarget(activeElement) && drawerElement.contains(activeElement)) {
+      return
+    }
+
     clearDrawerOpenTimer(side)
     clearDrawerCloseTimer(side)
     drawerCloseTimersRef.current[side] = window.setTimeout(() => {
@@ -694,6 +709,25 @@ export default function App() {
       ...patch
     }))
   }
+
+  const handleDrawerBlur = useEffectEvent(
+    (side: 'left' | 'right', currentTarget: HTMLElement, relatedTarget: EventTarget | null) => {
+      if (relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
+        return
+      }
+
+      window.setTimeout(() => {
+        const activeElement = document.activeElement
+        if (currentTarget.matches(':hover')) {
+          return
+        }
+        if (currentTarget.contains(activeElement) && isDrawerStickyFocusTarget(activeElement)) {
+          return
+        }
+        scheduleDrawerClose(side)
+      }, 0)
+    }
+  )
 
   const openExportModal = useEffectEvent((options?: { collapseRightDrawer?: boolean; splitGeometry?: SheetGeometryState | null }) => {
     clearDrawerOpenTimer('right')
@@ -1783,9 +1817,7 @@ export default function App() {
               drawerRefs.current.left = element
             }}
             onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                scheduleDrawerClose('left')
-              }
+              handleDrawerBlur('left', event.currentTarget, event.relatedTarget)
             }}
             onMouseEnter={() => scheduleDrawerOpen('left')}
             onMouseLeave={() => scheduleDrawerClose('left')}
@@ -2003,9 +2035,7 @@ export default function App() {
               drawerRefs.current.right = element
             }}
             onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                scheduleDrawerClose('right')
-              }
+              handleDrawerBlur('right', event.currentTarget, event.relatedTarget)
             }}
             onMouseEnter={() => scheduleDrawerOpen('right')}
             onMouseLeave={() => scheduleDrawerClose('right')}
