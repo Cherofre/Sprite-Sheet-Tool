@@ -491,6 +491,7 @@ export default function App() {
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
   const [pendingSplitExportGeometry, setPendingSplitExportGeometry] = useState<SheetGeometryState | null>(null)
   const [appliedSheetGeometrySignature, setAppliedSheetGeometrySignature] = useState<string | null>(null)
+  const [resetViewNonce, setResetViewNonce] = useState(0)
   const [lastExportDirectory, setLastExportDirectory] = useState<string | null>(persistedExportPreferences.lastDirectory)
   const operationRef = useRef<OperationController | null>(null)
   const smokeFnsRef = useRef<SmokeBridge | null>(null)
@@ -528,6 +529,10 @@ export default function App() {
 
   const recommendedLayout = recommendSheetLayout(exportFrames.length)
   const sheetGeometry = getSheetGeometry(sheet)
+  const hasSheetSource = Boolean(sheet.source)
+  const hasWorkspaceContent = frames.length > 0 || hasSheetSource
+  const leftDrawerFixed = hasWorkspaceContent && isDrawerFixed('left')
+  const rightDrawerFixed = hasWorkspaceContent && isDrawerFixed('right')
 
   useEffect(() => {
     window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(uiPreferences))
@@ -1126,6 +1131,11 @@ export default function App() {
     stepSequence(1)
   }
 
+  const handleResetView = (): void => {
+    setResetViewNonce((value) => value + 1)
+    updatePlaybackSettings({ zoom: 'fit' }, false)
+  }
+
   const handleTogglePlay = (): void => {
     if (frames.length === 0) {
       return
@@ -1479,7 +1489,7 @@ export default function App() {
 
     if (event.key.toLowerCase() === 'f' || (isPrimaryModifier && event.key === '0')) {
       event.preventDefault()
-      updatePlaybackSettings({ zoom: 'fit' }, false)
+      handleResetView()
       return
     }
 
@@ -1754,8 +1764,8 @@ export default function App() {
         <div
           className={[
             'app-workspace',
-            isDrawerFixed('left') ? 'workspace-fixed-left' : '',
-            isDrawerFixed('right') ? 'workspace-fixed-right' : ''
+            leftDrawerFixed ? 'workspace-fixed-left' : '',
+            rightDrawerFixed ? 'workspace-fixed-right' : ''
           ]
             .filter(Boolean)
             .join(' ')}
@@ -1765,7 +1775,7 @@ export default function App() {
               'sidebar-drawer',
               'sidebar-drawer-left',
               isDrawerVisible('left') ? 'sidebar-drawer-open' : '',
-              isDrawerFixed('left') ? 'sidebar-drawer-fixed' : ''
+              leftDrawerFixed ? 'sidebar-drawer-fixed' : ''
             ]
               .filter(Boolean)
               .join(' ')}
@@ -1779,18 +1789,18 @@ export default function App() {
             }}
             onMouseEnter={() => scheduleDrawerOpen('left')}
             onMouseLeave={() => scheduleDrawerClose('left')}
-            style={!sheet.source ? { display: 'none' } : undefined}
+            style={!hasWorkspaceContent ? { display: 'none' } : undefined}
           >
             <div className="drawer-content" onFocusCapture={() => openDrawer('left')} onMouseEnter={() => openDrawer('left')}>
               <div className="drawer-topbar">
                 <span className="drawer-title">图集识别</span>
                 <button
-                  className={isDrawerFixed('left') ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
+                  className={leftDrawerFixed ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
                   onClick={() => toggleDrawerFixed('left')}
-                  title={isDrawerFixed('left') ? '取消固定左侧区域' : '固定左侧区域'}
+                  title={leftDrawerFixed ? '取消固定左侧区域' : '固定左侧区域'}
                   type="button"
                 >
-                  {isDrawerFixed('left') ? '已固定' : '固定'}
+                  {leftDrawerFixed ? '已固定' : '固定'}
                 </button>
               </div>
               <SheetPanel
@@ -1881,6 +1891,7 @@ export default function App() {
                   canClearWorkspace={canClear}
                   frame={currentFrame}
                   onRequestClearWorkspace={handleClearWorkspace}
+                  resetViewNonce={resetViewNonce}
                   onZoomChange={(zoom) => updatePlaybackSettings({ zoom }, false)}
                   zoom={playback.zoom}
                 />
@@ -1915,7 +1926,7 @@ export default function App() {
                     </select>
                     <button
                       className="secondary-button toolbar-reset-btn"
-                      onClick={() => updatePlaybackSettings({ zoom: 'fit' }, false)}
+                      onClick={handleResetView}
                       type="button"
                     >
                       <span>重置</span>
@@ -1984,7 +1995,7 @@ export default function App() {
               'sidebar-drawer',
               'sidebar-drawer-right',
               isDrawerVisible('right') ? 'sidebar-drawer-open' : '',
-              isDrawerFixed('right') ? 'sidebar-drawer-fixed' : ''
+              rightDrawerFixed ? 'sidebar-drawer-fixed' : ''
             ]
               .filter(Boolean)
               .join(' ')}
@@ -2021,12 +2032,12 @@ export default function App() {
               <div className="drawer-topbar">
                 <span className="drawer-title">编辑与导出</span>
                 <button
-                  className={isDrawerFixed('right') ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
+                  className={rightDrawerFixed ? 'drawer-lock-btn active' : 'drawer-lock-btn'}
                   onClick={() => toggleDrawerFixed('right')}
-                  title={isDrawerFixed('right') ? '取消固定右侧区域' : '固定右侧区域'}
+                  title={rightDrawerFixed ? '取消固定右侧区域' : '固定右侧区域'}
                   type="button"
                 >
-                  {isDrawerFixed('right') ? '已固定' : '固定'}
+                  {rightDrawerFixed ? '已固定' : '固定'}
                 </button>
               </div>
               <div className="drawer-scroll-stack">

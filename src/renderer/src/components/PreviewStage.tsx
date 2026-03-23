@@ -11,6 +11,7 @@ interface PreviewStageProps {
   canClearWorkspace?: boolean
   frame?: FrameItem
   onRequestClearWorkspace?: () => void
+  resetViewNonce?: number
   onZoomChange?: (zoom: number) => void
   zoom: number | 'fit'
 }
@@ -44,6 +45,7 @@ export function PreviewStage({
   canClearWorkspace = false,
   frame,
   onRequestClearWorkspace,
+  resetViewNonce = 0,
   onZoomChange,
   zoom
 }: PreviewStageProps) {
@@ -80,6 +82,10 @@ export function PreviewStage({
       setPan({ x: 0, y: 0 })
     }
   }, [zoom])
+
+  useEffect(() => {
+    setPan({ x: 0, y: 0 })
+  }, [resetViewNonce])
 
   useEffect(() => {
     const handlePointerMove = (event: globalThis.PointerEvent) => {

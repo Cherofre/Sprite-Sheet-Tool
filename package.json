@@ -7,8 +7,9 @@
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
+    "clean:artifacts": "node scripts/clean-build-artifacts.mjs",
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "npm run clean:artifacts && electron-vite build",
     "icon:generate": "node scripts/generate-icons.mjs",
     "lint": "eslint . --max-warnings=0",
     "package:nsis": "npm run build && npm run icon:generate && npm run sign:report && electron-builder --win nsis --publish never -c.artifactName=${productName}-${version}-setup.${ext}",
