@@ -4,15 +4,13 @@ import { decompressFrames, parseGIF } from 'gifuct-js'
 import type { FrameItem, ImportedFilePayload, ProgressCallback } from '@shared/types'
 
 import { stripExtension } from '@lib/fs/fileNames'
+import { dataUrlToArrayBuffer } from '@lib/image/dataUrl'
 import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
 import { runImageWorkerTask, supportsImageWorker } from '@lib/image/worker.client'
 
 import { loadImageElement } from './browser'
 
-const dataUrlToArrayBuffer = async (dataUrl: string): Promise<ArrayBuffer> => {
-  const response = await fetch(dataUrl)
-  return response.arrayBuffer()
-}
+const loadGifArrayBuffer = async (dataUrl: string): Promise<ArrayBuffer> => dataUrlToArrayBuffer(dataUrl)
 
 export interface GifDecodeResult {
   averageDelayMs: number
@@ -37,7 +35,7 @@ export const decodeGifToFrames = async (
     }
   }
 
-  const gifBuffer = await dataUrlToArrayBuffer(payload.dataUrl)
+  const gifBuffer = await loadGifArrayBuffer(payload.dataUrl)
   const parsedGif = parseGIF(gifBuffer)
   const parsedFrames = decompressFrames(parsedGif, true)
   const canvas = document.createElement('canvas')

@@ -7,6 +7,7 @@ import { buildExportFileName, buildExportSequence } from '@features/export/plans
 import { buildImportSession } from '@features/import/importSession'
 import { normalizeSheetLayout, recommendSheetLayout } from '@features/merge/layout'
 import { advanceSequencePosition, buildFrameSequence } from '@features/preview/frameSequence'
+import { getGridFrameMetrics } from '@lib/grid/sheetGeometry'
 import { canvasToBytes, composeSpriteSheet, encodeFramesToBytesBatch, rotateFrames, splitSheetToFrames } from '@lib/image/browser'
 import { encodeGif } from '@lib/image/gif'
 
@@ -188,17 +189,19 @@ const getSheetGeometry = (sheet: SheetState): SheetGeometryState => {
     }
   }
 
-  const validGrid = sheet.rows > 0 && sheet.columns > 0
-  const exact = validGrid && sheet.sourceWidth % sheet.columns === 0 && sheet.sourceHeight % sheet.rows === 0
-  const frameWidth = exact ? Math.floor(sheet.sourceWidth / sheet.columns) : 0
-  const frameHeight = exact ? Math.floor(sheet.sourceHeight / sheet.rows) : 0
+  const { canApply, frameHeight, frameWidth } = getGridFrameMetrics(
+    sheet.sourceWidth,
+    sheet.sourceHeight,
+    sheet.rows,
+    sheet.columns
+  )
 
   return {
-    canApply: exact && frameWidth > 0 && frameHeight > 0,
+    canApply,
     columns: sheet.columns,
     frameHeight,
     frameWidth,
-    predictedFrameCount: exact ? sheet.rows * sheet.columns : 0,
+    predictedFrameCount: canApply ? sheet.rows * sheet.columns : 0,
     rows: sheet.rows
   }
 }

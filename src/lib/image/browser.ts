@@ -1,6 +1,7 @@
 import type { ExportImageFormat, FrameItem, ImportedFilePayload, ProgressCallback, RotationStep } from '@shared/types'
 
 import { stripExtension } from '@lib/fs/fileNames'
+import { buildGridSliceRects } from '@lib/grid/sheetGeometry'
 import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
 import { runImageWorkerTask, supportsImageWorker } from '@lib/image/worker.client'
 
@@ -286,61 +287,49 @@ const splitSheetToFramesInRenderer = async (
   payload: ImportedFilePayload,
   rows: number,
   columns: number,
-  frameWidth: number,
-  frameHeight: number,
+  _frameWidth: number,
+  _frameHeight: number,
   onProgress?: ProgressCallback
 ): Promise<FrameItem[]> => {
   const image = await loadImageElement(payload.dataUrl)
   const frames: FrameItem[] = []
-  const totalFrames = rows * columns
+  const sliceRects = buildGridSliceRects(image.naturalWidth, image.naturalHeight, rows, columns)
+  const totalFrames = sliceRects.length
 
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const canvas = document.createElement('canvas')
-      canvas.width = frameWidth
-      canvas.height = frameHeight
+  for (const rect of sliceRects) {
+    const canvas = document.createElement('canvas')
+    canvas.width = rect.width
+    canvas.height = rect.height
 
-      const context = canvas.getContext('2d')
-      if (!context) {
-        throw new Error('Canvas is unavailable')
-      }
-
-      context.clearRect(0, 0, frameWidth, frameHeight)
-      context.drawImage(
-        image,
-        column * frameWidth,
-        row * frameHeight,
-        frameWidth,
-        frameHeight,
-        0,
-        0,
-        frameWidth,
-        frameHeight
-      )
-
-      const index = row * columns + column
-      frames.push({
-        dataUrl: canvasToDataUrl(canvas),
-        height: frameHeight,
-        id: crypto.randomUUID(),
-        name: `${stripExtension(payload.name)}_${String(index + 1).padStart(String(totalFrames).length, '0')}`,
-        sourcePath: payload.path,
-        sourceType: 'sheet',
-        width: frameWidth
-      })
-
-      const processed = index + 1
-      if (onProgress && shouldReportProgress(processed, totalFrames)) {
-        await onProgress({
-          current: processed,
-          percent: (processed / totalFrames) * 100,
-          stage: 'split-sheet',
-          total: totalFrames
-        })
-      }
-
-      await maybeYieldToBrowser(processed)
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error('Canvas is unavailable')
     }
+
+    context.clearRect(0, 0, rect.width, rect.height)
+    context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height)
+
+    frames.push({
+      dataUrl: canvasToDataUrl(canvas),
+      height: rect.height,
+      id: crypto.randomUUID(),
+      name: `${stripExtension(payload.name)}_${String(rect.index + 1).padStart(String(totalFrames).length, '0')}`,
+      sourcePath: payload.path,
+      sourceType: 'sheet',
+      width: rect.width
+    })
+
+    const processed = rect.index + 1
+    if (onProgress && shouldReportProgress(processed, totalFrames)) {
+      await onProgress({
+        current: processed,
+        percent: (processed / totalFrames) * 100,
+        stage: 'split-sheet',
+        total: totalFrames
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
   }
 
   return frames

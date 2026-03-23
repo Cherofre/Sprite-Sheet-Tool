@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { ExportSettings, GridCandidate, SheetState } from '@shared/types'
+import { getGridFrameMetrics } from '@lib/grid/sheetGeometry'
 
 import { SplitPreview } from './SplitPreview'
 
@@ -73,9 +74,7 @@ const buildDraftGeometry = (sourceWidth: number, sourceHeight: number, draft: Sh
 
   const rows = parsePositiveInteger(draft.rows) ?? 0
   const columns = parsePositiveInteger(draft.columns) ?? 0
-  const canApply = rows > 0 && columns > 0 && sourceWidth % columns === 0 && sourceHeight % rows === 0
-  const frameWidth = canApply ? Math.floor(sourceWidth / columns) : columns > 0 ? Math.floor(sourceWidth / columns) : 0
-  const frameHeight = canApply ? Math.floor(sourceHeight / rows) : rows > 0 ? Math.floor(sourceHeight / rows) : 0
+  const { canApply, frameHeight, frameWidth } = getGridFrameMetrics(sourceWidth, sourceHeight, rows, columns)
 
   return {
     canApply,
@@ -225,8 +224,12 @@ export function SheetPanel({
         return
       }
 
-      const nextFrameWidth = Math.floor(sheet.sourceWidth / nextColumns)
-      const nextFrameHeight = Math.floor(sheet.sourceHeight / nextRows)
+      const { frameHeight: nextFrameHeight, frameWidth: nextFrameWidth } = getGridFrameMetrics(
+        sheet.sourceWidth,
+        sheet.sourceHeight,
+        nextRows,
+        nextColumns
+      )
       if (
         sheet.mode === 'grid' &&
         sheet.rows === nextRows &&
@@ -390,8 +393,6 @@ export function SheetPanel({
         <SplitPreview
           canApply={geometry.canApply}
           columns={geometry.columns}
-          frameHeight={geometry.frameHeight}
-          frameWidth={geometry.frameWidth}
           predictedFrameCount={geometry.predictedFrameCount}
           rows={geometry.rows}
           source={sheet.source}

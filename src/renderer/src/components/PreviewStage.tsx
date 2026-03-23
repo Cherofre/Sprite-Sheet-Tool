@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEventHandler } from 'react'
 
 import type { BackgroundMode, FrameItem } from '@shared/types'
+import { dataUrlToBlob } from '@lib/image/dataUrl'
 
 import { useEditorStore } from '../store/editorStore'
 
@@ -30,8 +31,7 @@ const backgroundClassByMode: Record<BackgroundMode, string> = {
 const clampZoom = (value: number): number => Math.min(800, Math.max(10, value))
 
 const copyFrameToClipboard = async (frame: FrameItem): Promise<void> => {
-  const response = await fetch(frame.dataUrl)
-  const blob = await response.blob()
+  const blob = dataUrlToBlob(frame.dataUrl)
 
   if (!('clipboard' in navigator) || typeof ClipboardItem === 'undefined') {
     throw new Error('当前环境不支持写入系统剪贴板。')

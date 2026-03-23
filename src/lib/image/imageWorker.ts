@@ -5,6 +5,8 @@ import { GIFEncoder, applyPalette, quantize } from 'gifenc'
 import { decompressFrames, parseGIF } from 'gifuct-js'
 
 import { stripExtension } from '@lib/fs/fileNames'
+import { buildGridSliceRects } from '@lib/grid/sheetGeometry'
+import { dataUrlToArrayBuffer, dataUrlToBlob } from '@lib/image/dataUrl'
 import { maybeYieldToBrowser, shouldReportProgress } from '@lib/image/taskScheduler'
 
 import type {
@@ -43,18 +45,10 @@ const blobToDataUrl = async (blob: Blob): Promise<string> => {
   })
 }
 
-const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
-  const response = await fetch(dataUrl)
-  return response.blob()
-}
-
-const dataUrlToArrayBuffer = async (dataUrl: string): Promise<ArrayBuffer> => {
-  const response = await fetch(dataUrl)
-  return response.arrayBuffer()
-}
+const loadBuffer = async (dataUrl: string): Promise<ArrayBuffer> => dataUrlToArrayBuffer(dataUrl)
 
 const loadBitmap = async (dataUrl: string): Promise<ImageBitmap> => {
-  const blob = await dataUrlToBlob(dataUrl)
+  const blob = dataUrlToBlob(dataUrl)
   return createImageBitmap(blob)
 }
 
@@ -177,57 +171,45 @@ const splitSheetInWorker = async (
   payload: ImportedFilePayload,
   rows: number,
   columns: number,
-  frameWidth: number,
-  frameHeight: number
+  _frameWidth: number,
+  _frameHeight: number
 ): Promise<FrameItem[]> => {
   const image = await loadBitmap(payload.dataUrl)
   const frames: FrameItem[] = []
-  const totalFrames = rows * columns
+  const sliceRects = buildGridSliceRects(image.width, image.height, rows, columns)
+  const totalFrames = sliceRects.length
 
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const canvas = createCanvas(frameWidth, frameHeight)
-      const context = canvas.getContext('2d')
-      if (!context) {
-        throw new Error('Canvas is unavailable')
-      }
-
-      context.clearRect(0, 0, frameWidth, frameHeight)
-      context.drawImage(
-        image,
-        column * frameWidth,
-        row * frameHeight,
-        frameWidth,
-        frameHeight,
-        0,
-        0,
-        frameWidth,
-        frameHeight
-      )
-
-      const index = row * columns + column
-      frames.push({
-        dataUrl: await toPngDataUrl(canvas),
-        height: frameHeight,
-        id: crypto.randomUUID(),
-        name: `${stripExtension(payload.name)}_${String(index + 1).padStart(String(totalFrames).length, '0')}`,
-        sourcePath: payload.path,
-        sourceType: 'sheet',
-        width: frameWidth
-      })
-
-      const processed = index + 1
-      if (shouldReportProgress(processed, totalFrames)) {
-        await postProgress(id, {
-          current: processed,
-          percent: (processed / totalFrames) * 100,
-          stage: 'split-sheet',
-          total: totalFrames
-        })
-      }
-
-      await maybeYieldToBrowser(processed)
+  for (const rect of sliceRects) {
+    const canvas = createCanvas(rect.width, rect.height)
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error('Canvas is unavailable')
     }
+
+    context.clearRect(0, 0, rect.width, rect.height)
+    context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height)
+
+    frames.push({
+      dataUrl: await toPngDataUrl(canvas),
+      height: rect.height,
+      id: crypto.randomUUID(),
+      name: `${stripExtension(payload.name)}_${String(rect.index + 1).padStart(String(totalFrames).length, '0')}`,
+      sourcePath: payload.path,
+      sourceType: 'sheet',
+      width: rect.width
+    })
+
+    const processed = rect.index + 1
+    if (shouldReportProgress(processed, totalFrames)) {
+      await postProgress(id, {
+        current: processed,
+        percent: (processed / totalFrames) * 100,
+        stage: 'split-sheet',
+        total: totalFrames
+      })
+    }
+
+    await maybeYieldToBrowser(processed)
   }
 
   return frames
@@ -327,7 +309,7 @@ const composeSheetInWorker = async (
 }
 
 const decodeGifInWorker = async (id: string, payload: ImportedFilePayload): Promise<DecodeGifWorkerResult> => {
-  const gifBuffer = await dataUrlToArrayBuffer(payload.dataUrl)
+  const gifBuffer = await loadBuffer(payload.dataUrl)
   const parsedGif = parseGIF(gifBuffer)
   const parsedFrames = decompressFrames(parsedGif, true)
   const canvas = createCanvas(parsedGif.lsd.width, parsedGif.lsd.height)

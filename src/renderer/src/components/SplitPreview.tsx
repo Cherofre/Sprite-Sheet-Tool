@@ -3,14 +3,13 @@ import { createPortal } from 'react-dom'
 
 import { buildSplitPreviewSampleIndices } from '@features/split/preview'
 import type { ImportedFilePayload } from '@shared/types'
+import { buildGridSliceRects } from '@lib/grid/sheetGeometry'
 
 import { loadImageElement } from '@lib/image/browser'
 
 interface SplitPreviewProps {
   canApply: boolean
   columns: number
-  frameHeight: number
-  frameWidth: number
   predictedFrameCount: number
   rows: number
   source: ImportedFilePayload
@@ -32,8 +31,6 @@ const PREVIEW_THUMB_SIZE = 62
 export function SplitPreview({
   canApply,
   columns,
-  frameHeight,
-  frameWidth,
   predictedFrameCount,
   rows,
   source
@@ -52,14 +49,18 @@ export function SplitPreview({
       }
 
       const image = await loadImageElement(source.dataUrl)
+      const sliceRects = buildGridSliceRects(image.naturalWidth, image.naturalHeight, rows, columns)
       const thumbs = await Promise.all(
         sampleIndices.map(async (index) => {
-          const row = Math.floor(index / columns)
-          const column = index % columns
-          const scale = Math.min(PREVIEW_THUMB_SIZE / frameWidth, PREVIEW_THUMB_SIZE / frameHeight)
+          const rect = sliceRects[index]
+          if (!rect) {
+            throw new Error('Split preview index is out of range')
+          }
+
+          const scale = Math.min(PREVIEW_THUMB_SIZE / rect.width, PREVIEW_THUMB_SIZE / rect.height)
           const canvas = document.createElement('canvas')
-          canvas.width = Math.max(20, Math.round(frameWidth * scale))
-          canvas.height = Math.max(20, Math.round(frameHeight * scale))
+          canvas.width = Math.max(20, Math.round(rect.width * scale))
+          canvas.height = Math.max(20, Math.round(rect.height * scale))
 
           const context = canvas.getContext('2d')
           if (!context) {
@@ -67,17 +68,7 @@ export function SplitPreview({
           }
 
           context.clearRect(0, 0, canvas.width, canvas.height)
-          context.drawImage(
-            image,
-            column * frameWidth,
-            row * frameHeight,
-            frameWidth,
-            frameHeight,
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          )
+          context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height)
 
           return {
             dataUrl: canvas.toDataURL('image/png'),
@@ -96,7 +87,7 @@ export function SplitPreview({
     return () => {
       isCancelled = true
     }
-  }, [canApply, columns, frameHeight, frameWidth, predictedFrameCount, sampleIndices, source.dataUrl])
+  }, [canApply, columns, predictedFrameCount, rows, sampleIndices, source.dataUrl])
 
   const overlayStyle =
     rows > 0 && columns > 0

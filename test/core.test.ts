@@ -11,6 +11,8 @@ import {
   scoreCandidateWithCellCenters,
   scoreCandidateWithInkProfiles
 } from '@lib/grid/detectRegularGrid'
+import { dataUrlToArrayBuffer, dataUrlToBlob, dataUrlToBytes } from '@lib/image/dataUrl'
+import { buildGridSliceRects, getGridFrameMetrics } from '@lib/grid/sheetGeometry'
 import { naturalSort } from '@lib/sort/naturalSort'
 
 describe('naturalSort', () => {
@@ -24,6 +26,13 @@ describe('detectRegularGrid', () => {
   it('offers common evenly divided sheet candidates', () => {
     const candidates = detectRegularGrid(1024, 1024)
     expect(candidates.some((candidate) => candidate.rows === 8 && candidate.columns === 8)).toBe(true)
+  })
+
+  it('still offers 5x5 and 6x6 candidates for padded square sheets', () => {
+    const candidates = detectRegularGrid(2048, 2048)
+
+    expect(candidates.some((candidate) => candidate.rows === 5 && candidate.columns === 5)).toBe(true)
+    expect(candidates.some((candidate) => candidate.rows === 6 && candidate.columns === 6)).toBe(true)
   })
 })
 
@@ -216,5 +225,33 @@ describe('buildSplitPreviewSampleIndices', () => {
 
   it('spreads preview indices across the full sequence', () => {
     expect(buildSplitPreviewSampleIndices(16, 6)).toEqual([0, 3, 6, 9, 12, 15])
+  })
+})
+
+describe('sheetGeometry', () => {
+  it('treats padded 6x6 sheets as splittable and distributes remainder pixels', () => {
+    expect(getGridFrameMetrics(2048, 2048, 6, 6)).toMatchObject({
+      canApply: true,
+      frameHeight: 341,
+      frameWidth: 341
+    })
+
+    const rects = buildGridSliceRects(2048, 2048, 6, 6)
+    expect(rects).toHaveLength(36)
+    expect(rects.slice(0, 6).map((rect) => rect.width)).toEqual([341, 342, 341, 341, 342, 341])
+    expect(rects.filter((rect) => rect.column === 0).map((rect) => rect.height)).toEqual([341, 342, 341, 341, 342, 341])
+  })
+})
+
+describe('dataUrl helpers', () => {
+  it('converts data URLs without relying on fetch', async () => {
+    const dataUrl = 'data:text/plain;base64,SGVsbG8='
+
+    expect(Array.from(dataUrlToBytes(dataUrl))).toEqual([72, 101, 108, 108, 111])
+    expect(new Uint8Array(dataUrlToArrayBuffer(dataUrl))).toEqual(new Uint8Array([72, 101, 108, 108, 111]))
+
+    const blob = dataUrlToBlob(dataUrl)
+    expect(blob.type).toBe('text/plain')
+    expect(await blob.text()).toBe('Hello')
   })
 })

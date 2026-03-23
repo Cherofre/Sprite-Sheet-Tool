@@ -1,10 +1,12 @@
 import { GRID_CANDIDATE_LIMIT } from '@shared/constants'
 import type { GridCandidate } from '@shared/types'
+import { getGridFrameMetrics } from '@lib/grid/sheetGeometry'
 
 const COMMON_SQUARE_GRIDS = new Set([2, 3, 4, 5, 6, 8, 10, 12, 16])
 const GRID_HINT_PATTERN = /(\d{1,2})\s*[xX*]\s*(\d{1,2})/
 const EPSILON = 0.0001
 const MAX_AUTO_DIVISIONS = 24
+const PRIORITY_SQUARE_GRIDS = [5, 6]
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value))
 
@@ -32,30 +34,33 @@ const buildGridCandidate = (
     return null
   }
 
-  if (sourceHeight % rows !== 0 || sourceWidth % columns !== 0) {
-    return null
-  }
-
   const frameCount = rows * columns
   if (frameCount <= 1) {
     return null
   }
 
-  const frameWidth = sourceWidth / columns
-  const frameHeight = sourceHeight / rows
+  const { canApply, frameHeight, frameWidth } = getGridFrameMetrics(sourceWidth, sourceHeight, rows, columns)
+  if (!canApply) {
+    return null
+  }
+
+  const exactFrameWidth = sourceWidth / columns
+  const exactFrameHeight = sourceHeight / rows
   if (frameWidth < 4 || frameHeight < 4) {
     return null
   }
 
-  const score = scoreCandidate(rows, columns, frameWidth, frameHeight) + scoreBoost
+  const score = scoreCandidate(rows, columns, exactFrameWidth, exactFrameHeight) + scoreBoost
   const confidence = clamp(score / 1.15, 0, 0.99)
+  const approximate = !Number.isInteger(exactFrameWidth) || !Number.isInteger(exactFrameHeight)
+  const sizeLabel = approximate ? `~${frameWidth} x ${frameHeight}` : `${frameWidth} x ${frameHeight}`
 
   return {
     columns,
     confidence,
     frameHeight,
     frameWidth,
-    label: labelPrefix ? `${labelPrefix}: ${rows} x ${columns} grid (${frameWidth} x ${frameHeight})` : `${rows} x ${columns} grid (${frameWidth} x ${frameHeight})`,
+    label: labelPrefix ? `${labelPrefix}: ${rows} x ${columns} grid (${sizeLabel})` : `${rows} x ${columns} grid (${sizeLabel})`,
     rows,
     score
   }
@@ -78,7 +83,30 @@ export const detectRegularGrid = (sourceWidth: number, sourceHeight: number, max
     }
   }
 
-  return candidates.sort((left, right) => right.score - left.score).slice(0, GRID_CANDIDATE_LIMIT)
+  const sortedCandidates = candidates.sort((left, right) => right.score - left.score)
+  const selectedCandidates = sortedCandidates.slice(0, GRID_CANDIDATE_LIMIT)
+
+  for (const size of PRIORITY_SQUARE_GRIDS) {
+    if (selectedCandidates.some((candidate) => candidate.rows === size && candidate.columns === size)) {
+      continue
+    }
+
+    const priorityCandidate = sortedCandidates.find((candidate) => candidate.rows === size && candidate.columns === size)
+    if (!priorityCandidate) {
+      continue
+    }
+
+    const replacementIndex = [...selectedCandidates]
+      .map((candidate, index) => ({ candidate, index }))
+      .reverse()
+      .find(({ candidate }) => !PRIORITY_SQUARE_GRIDS.includes(candidate.rows) || candidate.rows !== candidate.columns)?.index
+
+    if (typeof replacementIndex === 'number') {
+      selectedCandidates[replacementIndex] = priorityCandidate
+    }
+  }
+
+  return selectedCandidates.sort((left, right) => right.score - left.score)
 }
 
 export interface InkProfiles {

@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from 'react'
 
 import type { FrameItem } from '@shared/types'
+import { dataUrlToBytes } from '@lib/image/dataUrl'
 
 import { useEditorStore } from '../store/editorStore'
 
@@ -162,12 +163,6 @@ function SortableFrameCard({
       </ContextMenu.Portal>
     </ContextMenu.Root>
   )
-}
-
-const frameDataUrlToBytes = async (dataUrl: string): Promise<Uint8Array> => {
-  const response = await fetch(dataUrl)
-  const arrayBuffer = await response.arrayBuffer()
-  return new Uint8Array(arrayBuffer)
 }
 
 export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame, selectedFrameIds }: FrameTimelineProps) {
@@ -344,7 +339,7 @@ export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame
 
   const handleSaveFrameAs = async (frame: FrameItem): Promise<void> => {
     try {
-      const bytes = await frameDataUrlToBytes(frame.dataUrl)
+      const bytes = dataUrlToBytes(frame.dataUrl)
       const savedPath = await window.desktopApi.saveBinaryFile({
         data: Array.from(bytes),
         defaultPath: `${frame.name}.png`,
