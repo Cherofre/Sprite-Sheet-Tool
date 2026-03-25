@@ -12,7 +12,9 @@ import { useEditorStore } from '../store/editorStore'
 interface FrameTimelineProps {
   currentFrame: number
   frames: FrameItem[]
+  onEditFrameInPhotoshop: (frame: FrameItem) => void
   onMoveFrame: (activeId: string, overId: string) => void
+  onReplaceCurrentFrame: (frame: FrameItem) => void
   onSelectFrame: (frameId: string, toggle?: boolean, range?: boolean) => void
   selectedFrameIds: string[]
 }
@@ -31,8 +33,10 @@ interface SortableFrameCardProps {
   isSelected: boolean
   onDeleteFrames: (frameIds: string[]) => void
   onDuplicateFrame: (frameId: string) => void
+  onEditFrameInPhotoshop: (frame: FrameItem) => void
   onMoveFramesToEnd: (frameIds: string[]) => void
   onMoveFramesToStart: (frameIds: string[]) => void
+  onReplaceCurrentFrame: (frame: FrameItem) => void
   onSaveFrameAs: (frame: FrameItem) => void
   onSelectFrame: (event: MouseEvent<HTMLButtonElement>, frameId: string) => void
   registerCard: (frameId: string, node: HTMLButtonElement | null) => void
@@ -68,8 +72,10 @@ function SortableFrameCard({
   isSelected,
   onDeleteFrames,
   onDuplicateFrame,
+  onEditFrameInPhotoshop,
   onMoveFramesToEnd,
   onMoveFramesToStart,
+  onReplaceCurrentFrame,
   onSaveFrameAs,
   onSelectFrame,
   registerCard,
@@ -153,6 +159,12 @@ function SortableFrameCard({
           <ContextMenu.Item className="ContextMenuItem" onSelect={() => onSaveFrameAs(frame)}>
             单帧另存为...
           </ContextMenu.Item>
+          <ContextMenu.Item className="ContextMenuItem" onSelect={() => onEditFrameInPhotoshop(frame)}>
+            用 Photoshop 修改这帧...
+          </ContextMenu.Item>
+          <ContextMenu.Item className="ContextMenuItem" onSelect={() => onReplaceCurrentFrame(frame)}>
+            导入并替换当前帧...
+          </ContextMenu.Item>
 
           <ContextMenu.Separator className="ContextMenuSeparator" />
 
@@ -165,7 +177,15 @@ function SortableFrameCard({
   )
 }
 
-export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame, selectedFrameIds }: FrameTimelineProps) {
+export function FrameTimeline({
+  currentFrame,
+  frames,
+  onEditFrameInPhotoshop,
+  onMoveFrame,
+  onReplaceCurrentFrame,
+  onSelectFrame,
+  selectedFrameIds
+}: FrameTimelineProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const deleteFrames = useEditorStore((state) => state.deleteFrames)
   const duplicateFrame = useEditorStore((state) => state.duplicateFrame)
@@ -396,8 +416,10 @@ export function FrameTimeline({ currentFrame, frames, onMoveFrame, onSelectFrame
                     key={frame.id}
                     onDeleteFrames={deleteFrames}
                     onDuplicateFrame={duplicateFrame}
+                    onEditFrameInPhotoshop={onEditFrameInPhotoshop}
                     onMoveFramesToEnd={moveFramesToEnd}
                     onMoveFramesToStart={moveFramesToStart}
+                    onReplaceCurrentFrame={onReplaceCurrentFrame}
                     onSaveFrameAs={(selectedFrame) => {
                       void handleSaveFrameAs(selectedFrame)
                     }}

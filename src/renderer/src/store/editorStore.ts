@@ -15,6 +15,10 @@ interface ReplaceFramesOptions {
   sheet?: SheetState
 }
 
+interface ReplaceFrameOptions {
+  recordHistory?: boolean
+}
+
 interface EditorState extends EditorSnapshot {
   errorMessage: string | null
   historyFuture: EditorSnapshot[]
@@ -32,6 +36,7 @@ interface EditorState extends EditorSnapshot {
   moveFramesToStart: (frameIds: string[]) => void
   moveFrame: (activeId: string, overId: string) => void
   redo: () => void
+  replaceFrame: (frameId: string, frame: FrameItem, options?: ReplaceFrameOptions) => void
   replaceFrames: (frames: FrameItem[], options?: ReplaceFramesOptions) => void
   resetWorkspace: () => void
   reverseFrames: () => void
@@ -329,6 +334,31 @@ export const useEditorStore = create<EditorState>((set) => ({
         historyFuture: state.historyFuture.slice(1),
         historyPast: [...state.historyPast, currentSnapshot].slice(-HISTORY_LIMIT),
         statusMessage: '已重做。'
+      }
+    }),
+
+  replaceFrame: (frameId, frame, options) =>
+    set((state) => {
+      const frameIndex = state.frames.findIndex((item) => item.id === frameId)
+      if (frameIndex === -1) {
+        return state
+      }
+
+      const frames = [...state.frames]
+      frames[frameIndex] = {
+        ...frame,
+        id: frameId
+      }
+
+      return {
+        ...snapshotToState({
+          exportSettings: state.exportSettings,
+          frames,
+          playback: state.playback,
+          selectedFrameIds: state.selectedFrameIds,
+          sheet: state.sheet
+        }),
+        ...(options?.recordHistory === false ? {} : withHistory(state))
       }
     }),
 

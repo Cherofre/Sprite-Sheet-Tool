@@ -49,7 +49,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: release/*
+          path: |
+            release/*-portable-dir.zip
+            release/*-portable-single.exe
+            release/*-setup.exe
+            release/*-setup.exe.blockmap
+            release/latest.yml
           if-no-files-found: error
 
       - name: Publish GitHub Release assets
@@ -57,4 +62,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: release/*
+          files: |
+            release/*-portable-dir.zip
+            release/*-portable-single.exe
+            release/*-setup.exe
+            release/*-setup.exe.blockmap
+            release/latest.yml

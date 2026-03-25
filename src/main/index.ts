@@ -5,6 +5,7 @@ import { app, BrowserWindow, Menu } from 'electron'
 import { APP_NAME } from '@shared/constants'
 
 import { registerIpcHandlers } from './ipc'
+import { initializeUpdater } from './updater'
 
 const createMainWindow = async (): Promise<void> => {
   let rendererRecoveryAttempts = 0
@@ -64,6 +65,7 @@ app.whenReady().then(async () => {
   }
 
   registerIpcHandlers()
+  await initializeUpdater()
   await createMainWindow()
 
   app.on('activate', async () => {

@@ -174,6 +174,8 @@ const splitSheetInWorker = async (
   _frameWidth: number,
   _frameHeight: number
 ): Promise<FrameItem[]> => {
+  void _frameWidth
+  void _frameHeight
   const image = await loadBitmap(payload.dataUrl)
   const frames: FrameItem[] = []
   const sliceRects = buildGridSliceRects(image.width, image.height, rows, columns)

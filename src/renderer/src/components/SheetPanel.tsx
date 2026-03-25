@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import type { ExportSettings, GridCandidate, SheetState } from '@shared/types'
+import type { GridCandidate, SheetState } from '@shared/types'
 import { getGridFrameMetrics } from '@lib/grid/sheetGeometry'
 
 import { SplitPreview } from './SplitPreview'
@@ -18,7 +18,6 @@ interface SheetPanelProps {
   appliedGeometrySignature: string | null
   canApply: boolean
   columns: number
-  exportSettings: ExportSettings
   frameHeight: number
   frameWidth: number
   isBusy?: boolean
@@ -86,9 +85,6 @@ const buildDraftGeometry = (sourceWidth: number, sourceHeight: number, draft: Sh
   }
 }
 
-const describeExportSettings = (exportSettings: ExportSettings) =>
-  `当前会复用统一导出设置：${exportSettings.imageFormat.toUpperCase()}，前缀“${exportSettings.fileNamePrefix}”，补零 ${exportSettings.padding} 位，跳帧 ${exportSettings.exportSkip}。`
-
 const buildGeometrySignature = (
   source: SheetState['source'],
   geometry: Pick<SheetGeometryPreview, 'canApply' | 'columns' | 'frameHeight' | 'frameWidth' | 'rows'>
@@ -133,11 +129,6 @@ const getApplyNotice = (applyState: ApplyState): { body: string; title: string }
         body: '已修改，未应用到时间轴。',
         title: '待应用'
       }
-    case 'unapplied':
-      return {
-        body: '当前网格尚未应用到时间轴。',
-        title: '未应用'
-      }
     default:
       return null
   }
@@ -145,7 +136,6 @@ const getApplyNotice = (applyState: ApplyState): { body: string; title: string }
 
 export function SheetPanel({
   appliedGeometrySignature,
-  exportSettings,
   isBusy = false,
   onApply,
   onChooseCandidate,
@@ -286,13 +276,11 @@ export function SheetPanel({
           <h2>图集识别</h2>
         </div>
 
-        <div className="hint-card">
-          <span className="eyebrow">源图</span>
-          <p>
-            {sheet.source.name}
-            <br />
+        <div className="sheet-source-meta" title={sheet.source.name}>
+          <strong>{sheet.source.name}</strong>
+          <span>
             {sheet.sourceWidth} x {sheet.sourceHeight}
-          </p>
+          </span>
         </div>
 
         <div className="toggle-group">
@@ -391,11 +379,6 @@ export function SheetPanel({
           source={sheet.source}
         />
 
-        <div className="hint-card">
-          <span className="eyebrow">导出设置</span>
-          <p>{describeExportSettings(exportSettings)}</p>
-        </div>
-
         {sheet.candidates.length > 0 ? (
           <div className="control-block">
             <div className="section-heading compact">
@@ -425,18 +408,18 @@ export function SheetPanel({
         ) : null}
       </div>
 
-      {applyNotice ? (
-        <div
-          aria-live="polite"
-          className={`sheet-floating-notice sheet-floating-notice-${applyState}`}
-          role="status"
-        >
-          <strong>{applyNotice.title}</strong>
-          <span>{applyNotice.body}</span>
-        </div>
-      ) : null}
-
       <div className="sheet-action-bar">
+        {applyNotice ? (
+          <div
+            aria-live="polite"
+            className={`sheet-floating-notice sheet-floating-notice-${applyState}`}
+            role="status"
+          >
+            <strong>{applyNotice.title}</strong>
+            <span>{applyNotice.body}</span>
+          </div>
+        ) : null}
+
         <div className="button-grid">
           <button
             className="primary-button"

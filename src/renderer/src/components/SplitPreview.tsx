@@ -20,6 +20,11 @@ interface PreviewThumb {
   index: number
 }
 
+interface SourceDimensions {
+  height: number
+  width: number
+}
+
 interface ActivePreview {
   dataUrl: string
   overlayStyle?: CSSProperties
@@ -27,6 +32,7 @@ interface ActivePreview {
 }
 
 const PREVIEW_THUMB_SIZE = 62
+const PREVIEW_STAGE_MAX_HEIGHT = 140
 
 export function SplitPreview({
   canApply,
@@ -37,7 +43,28 @@ export function SplitPreview({
 }: SplitPreviewProps) {
   const [sampleThumbs, setSampleThumbs] = useState<PreviewThumb[]>([])
   const [activePreview, setActivePreview] = useState<ActivePreview | null>(null)
+  const [sourceDimensions, setSourceDimensions] = useState<SourceDimensions | null>(null)
   const sampleIndices = useMemo(() => buildSplitPreviewSampleIndices(predictedFrameCount, 6), [predictedFrameCount])
+
+  useEffect(() => {
+    let isCancelled = false
+
+    const loadSourceDimensions = async () => {
+      const image = await loadImageElement(source.dataUrl)
+      if (!isCancelled) {
+        setSourceDimensions({
+          height: image.naturalHeight,
+          width: image.naturalWidth
+        })
+      }
+    }
+
+    void loadSourceDimensions()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [source.dataUrl])
 
   useEffect(() => {
     let isCancelled = false
@@ -98,6 +125,14 @@ export function SplitPreview({
         }
       : undefined
 
+  const previewFrameStyle =
+    sourceDimensions && sourceDimensions.width > 0 && sourceDimensions.height > 0
+      ? {
+          aspectRatio: `${sourceDimensions.width} / ${sourceDimensions.height}`,
+          width: `min(100%, ${Math.round((sourceDimensions.width / sourceDimensions.height) * PREVIEW_STAGE_MAX_HEIGHT)}px)`
+        }
+      : undefined
+
   const previewModal =
     activePreview && typeof document !== 'undefined'
       ? createPortal(
@@ -147,8 +182,10 @@ export function SplitPreview({
           }
           type="button"
         >
-          <img alt={source.name} className="sheet-preview-image" src={source.dataUrl} />
-          {overlayStyle ? <div className="sheet-preview-overlay" style={overlayStyle} /> : null}
+          <div className="sheet-preview-frame" style={previewFrameStyle}>
+            <img alt={source.name} className="sheet-preview-image" src={source.dataUrl} />
+            {overlayStyle ? <div className="sheet-preview-overlay" style={overlayStyle} /> : null}
+          </div>
         </button>
 
         {canApply ? (

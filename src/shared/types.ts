@@ -46,6 +46,7 @@ export interface ExportSettings {
 }
 
 export interface GridCandidate {
+  approximate: boolean
   columns: number
   confidence: number
   frameHeight: number
@@ -94,15 +95,57 @@ export interface WriteFileInput {
   filePath: string
 }
 
+export interface CreateTempBinaryFileInput {
+  data: number[]
+  extension?: string
+  fileName: string
+}
+
+export interface CreateTempBinaryFileResult {
+  filePath: string
+  modifiedTimeMs: number
+}
+
+export interface OpenInPhotoshopInput {
+  filePath: string
+  photoshopPath: string
+}
+
+export type UpdateMode = 'disabled' | 'installed' | 'portable'
+export type UpdatePhase = 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+
+export interface UpdateStatus {
+  canCheck: boolean
+  canDownload: boolean
+  canInstall: boolean
+  currentVersion: string
+  downloadProgressPercent: number | null
+  downloadUrl: string | null
+  latestVersion: string | null
+  message: string
+  mode: UpdateMode
+  phase: UpdatePhase
+}
+
 export interface DesktopApi {
   chooseDirectory(options?: ChooseDirectoryOptions): Promise<string | null>
+  choosePhotoshopExecutable(defaultPath?: string): Promise<string | null>
+  checkForAppUpdates(): Promise<UpdateStatus>
+  createTempBinaryFile(input: CreateTempBinaryFileInput): Promise<CreateTempBinaryFileResult>
   deletePaths(paths: string[]): Promise<void>
+  downloadAppUpdate(): Promise<UpdateStatus>
+  getFileModifiedTime(filePath: string): Promise<number | null>
+  getUpdateStatus(): Promise<UpdateStatus>
   getPathForDroppedFile(file: File): string
+  installDownloadedUpdate(): Promise<void>
+  readClipboardImage(): Promise<ImportedFilePayload | null>
   loadDirectory(dirPath: string): Promise<ImportedFilePayload[]>
   loadFiles(paths: string[]): Promise<ImportedFilePayload[]>
   loadPaths(paths: string[]): Promise<ImportedFilePayload[]>
   openDirectory(): Promise<string | null>
   openFiles(): Promise<string[] | null>
+  openInPhotoshop(input: OpenInPhotoshopInput): Promise<void>
+  openUpdateDownloadPage(): Promise<void>
   revealInFileExplorer(targetPath: string): Promise<void>
   saveBinaryFile(input: SaveFileInput): Promise<string | null>
   writeBinaryFile(input: WriteFileInput): Promise<string>

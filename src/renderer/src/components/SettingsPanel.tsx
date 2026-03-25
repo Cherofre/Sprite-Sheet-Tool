@@ -1,17 +1,28 @@
 import { createPortal } from 'react-dom'
 
+import type { UpdateStatus } from '@shared/types'
+
 export type DrawerFixedMode = 'none' | 'left' | 'right' | 'both'
 
 export interface UiPreferences {
   drawerBlurDelayMs: number
   drawerFixedMode: DrawerFixedMode
+  photoshopPath: string
 }
 
 interface SettingsPanelProps {
   isOpen: boolean
+  isUpdateActionPending: boolean
+  onCheckForUpdates: () => void
+  onChoosePhotoshopPath: () => void
+  onClearPhotoshopPath: () => void
   onClose: () => void
+  onDownloadUpdate: () => void
+  onInstallDownloadedUpdate: () => void
+  onOpenUpdateDownloadPage: () => void
   onUpdate: (patch: Partial<UiPreferences>) => void
   preferences: UiPreferences
+  updateStatus: UpdateStatus
 }
 
 const clampDelay = (value: string): number => {
@@ -23,10 +34,68 @@ const clampDelay = (value: string): number => {
   return Math.max(0, Math.min(3000, parsed))
 }
 
-export function SettingsPanel({ isOpen, onClose, onUpdate, preferences }: SettingsPanelProps) {
+const getUpdateModeLabel = (status: UpdateStatus): string => {
+  switch (status.mode) {
+    case 'installed':
+      return '安装版'
+    case 'portable':
+      return '便携版'
+    default:
+      return '开发环境'
+  }
+}
+
+const getSecondaryAction = (
+  status: UpdateStatus
+): { label: string } | null => {
+  if (status.mode === 'installed') {
+    if (status.canInstall) {
+      return {
+        label: '安装并重启'
+      }
+    }
+
+    if (status.canDownload) {
+      return {
+        label: '下载更新'
+      }
+    }
+  }
+
+  if (status.mode === 'portable' && status.phase === 'available' && status.downloadUrl) {
+    return {
+      label: '打开下载页'
+    }
+  }
+
+  return null
+}
+
+export function SettingsPanel({
+  isOpen,
+  isUpdateActionPending,
+  onCheckForUpdates,
+  onChoosePhotoshopPath,
+  onClearPhotoshopPath,
+  onClose,
+  onDownloadUpdate,
+  onInstallDownloadedUpdate,
+  onOpenUpdateDownloadPage,
+  onUpdate,
+  preferences,
+  updateStatus
+}: SettingsPanelProps) {
   if (!isOpen || typeof document === 'undefined') {
     return null
   }
+
+  const secondaryAction = getSecondaryAction(updateStatus)
+  const secondaryActionHandler =
+    updateStatus.mode === 'installed'
+      ? updateStatus.canInstall
+        ? onInstallDownloadedUpdate
+        : onDownloadUpdate
+      : onOpenUpdateDownloadPage
 
   return createPortal(
     <div className="modal-overlay">
@@ -39,7 +108,7 @@ export function SettingsPanel({ isOpen, onClose, onUpdate, preferences }: Settin
         <div className="modal-header">
           <div>
             <span className="eyebrow">设置</span>
-            <h2>界面与抽屉</h2>
+            <h2>界面、外部编辑与更新</h2>
           </div>
           <button className="secondary-button" onClick={onClose} type="button">
             关闭
@@ -72,15 +141,81 @@ export function SettingsPanel({ isOpen, onClose, onUpdate, preferences }: Settin
           </label>
         </div>
 
-        <div className="hint-card">
-          <span className="eyebrow">说明</span>
-          <p>
-            1. 固定模式会让侧栏常驻，并为预览区让出空间。
-            <br />
-            2. 抽屉上的锁定按钮是临时锁定，不会覆盖这里的固定模式。
-            <br />
-            3. 这些设置会自动保存在当前机器上；设置窗口只会通过右上关闭按钮或 `Esc` 关闭。
-          </p>
+        <div className="hint-card settings-editor-card">
+          <span className="eyebrow">Photoshop</span>
+          <p>时间轴和预览区的右键菜单都可以直接把当前帧交给 Photoshop 修改；程序会先准备一份临时 PNG，保存后自动回灌到这一帧。</p>
+
+          <label className="settings-path-field">
+            Photoshop 路径
+            <input
+              className="settings-path-input"
+              readOnly
+              type="text"
+              value={preferences.photoshopPath || '尚未设置 Photoshop 路径'}
+            />
+          </label>
+
+          <div className="button-row">
+            <button className="primary-button" onClick={onChoosePhotoshopPath} type="button">
+              选择 Photoshop
+            </button>
+            <button className="secondary-button" disabled={!preferences.photoshopPath} onClick={onClearPhotoshopPath} type="button">
+              清空路径
+            </button>
+          </div>
+        </div>
+
+        <div className="hint-card settings-update-card">
+          <span className="eyebrow">检查更新</span>
+
+          <div className="stats-grid">
+            <div className="stat-card">
+              <span>当前版本</span>
+              <strong>v{updateStatus.currentVersion}</strong>
+            </div>
+            <div className="stat-card">
+              <span>当前渠道</span>
+              <strong>{getUpdateModeLabel(updateStatus)}</strong>
+            </div>
+          </div>
+
+          <p>{updateStatus.message}</p>
+
+          {updateStatus.latestVersion ? (
+            <div className="settings-update-meta">
+              <span>最新版本</span>
+              <strong>v{updateStatus.latestVersion}</strong>
+            </div>
+          ) : null}
+
+          {updateStatus.phase === 'downloading' && updateStatus.downloadProgressPercent !== null ? (
+            <div className="settings-update-meta">
+              <span>下载进度</span>
+              <strong>{Math.round(updateStatus.downloadProgressPercent)}%</strong>
+            </div>
+          ) : null}
+
+          <div className="settings-update-actions">
+            <button
+              className="primary-button"
+              disabled={!updateStatus.canCheck || isUpdateActionPending}
+              onClick={onCheckForUpdates}
+              type="button"
+            >
+              {isUpdateActionPending && updateStatus.phase === 'checking' ? '检查中...' : '检查更新'}
+            </button>
+
+            {secondaryAction ? (
+              <button
+                className="secondary-button"
+                disabled={isUpdateActionPending && updateStatus.phase !== 'available' && updateStatus.phase !== 'downloaded'}
+                onClick={secondaryActionHandler}
+                type="button"
+              >
+                {updateStatus.phase === 'downloading' ? '下载中...' : secondaryAction.label}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>,

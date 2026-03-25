@@ -1,14 +1,34 @@
 ﻿import { startTransition, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 
 import { DEFAULT_EXPORT, DEFAULT_PLAYBACK, SUPPORTED_EXTENSIONS } from '@shared/constants'
-import type { ExportSettings, FrameItem, GridCandidate, ImportedFilePayload, PlaybackSettings, SheetState, TaskProgress } from '@shared/types'
+import type {
+  ExportSettings,
+  FrameItem,
+  GridCandidate,
+  ImportedFilePayload,
+  PlaybackSettings,
+  SheetState,
+  TaskProgress,
+  UpdateStatus
+} from '@shared/types'
 
+import { buildExternalEditTempFileName, buildReinjectedFrame } from '@features/edit/externalEditor'
 import { buildExportFileName, buildExportSequence } from '@features/export/plans'
-import { buildImportSession } from '@features/import/importSession'
+import { createEmptySheetState } from '@features/history/history'
+import {
+  buildSingleImageImportPromptFromSheet,
+  buildImportSession,
+  buildSheetImportSession,
+  buildSingleFrameImportSession,
+  type ImportSession,
+  type SheetImportGeometry,
+  type SingleImageImportPrompt
+} from '@features/import/importSession'
 import { normalizeSheetLayout, recommendSheetLayout } from '@features/merge/layout'
 import { advanceSequencePosition, buildFrameSequence } from '@features/preview/frameSequence'
 import { getGridFrameMetrics } from '@lib/grid/sheetGeometry'
-import { canvasToBytes, composeSpriteSheet, encodeFramesToBytesBatch, rotateFrames, splitSheetToFrames } from '@lib/image/browser'
+import { canvasToBytes, composeSpriteSheet, encodeFramesToBytesBatch, filePayloadToFrame, rotateFrames, splitSheetToFrames } from '@lib/image/browser'
+import { dataUrlToBytes } from '@lib/image/dataUrl'
 import { encodeGif } from '@lib/image/gif'
 
 import { ExportPanel } from './components/ExportPanel'
@@ -22,13 +42,29 @@ import { useCanRedo, useCanUndo, useEditorStore } from './store/editorStore'
 
 const OPERATION_CANCELLED = '__OPERATION_CANCELLED__'
 const DRAWER_OPEN_DELAY_MS = 150
+const EXTERNAL_EDIT_POLL_INTERVAL_MS = 1200
 const EXPORT_ENCODE_BATCH_SIZE = 8
+const EAGER_SINGLE_IMAGE_PROMPT_CONFIDENCE = 0.5
+const SINGLE_IMAGE_MODAL_CANDIDATE_LIMIT = 4
 const UI_PREFERENCES_KEY = 'sprite-sheet-tool.ui-preferences.v1'
 const PLAYBACK_PREFERENCES_KEY = 'sprite-sheet-tool.playback-preferences.v1'
 const EXPORT_PREFERENCES_KEY = 'sprite-sheet-tool.export-preferences.v1'
 const DEFAULT_UI_PREFERENCES: UiPreferences = {
   drawerBlurDelayMs: 400,
-  drawerFixedMode: 'none'
+  drawerFixedMode: 'none',
+  photoshopPath: ''
+}
+const DEFAULT_UPDATE_STATUS: UpdateStatus = {
+  canCheck: false,
+  canDownload: false,
+  canInstall: false,
+  currentVersion: '...',
+  downloadProgressPercent: null,
+  downloadUrl: null,
+  latestVersion: null,
+  message: '正在读取更新信息...',
+  mode: 'disabled',
+  phase: 'idle'
 }
 
 const saveFiltersByFormat = {
@@ -63,6 +99,35 @@ interface DrawerOpenState {
 interface ExportNotice {
   label: string
   targetPath: string
+}
+
+type ImportMode = 'append' | 'replace' | 'replace-current'
+
+interface PendingImportPrompt {
+  currentFrameCount: number
+  currentFrameIndex: number
+  sourceLabel: string
+}
+
+type PendingSingleImageImportPrompt = SingleImageImportPrompt
+
+interface PendingSingleImageImportDraft {
+  columns: string
+  frameHeight: string
+  frameWidth: string
+  mode: SheetState['mode']
+  rows: string
+}
+
+interface PendingSingleImageGeometry extends SheetImportGeometry {
+  canApply: boolean
+  predictedFrameCount: number
+}
+
+interface ExternalEditSession {
+  filePath: string
+  lastFailedModifiedTimeMs?: number
+  lastModifiedTimeMs: number
 }
 
 interface PersistedExportPreferences {
@@ -113,6 +178,7 @@ const shortcutRows = [
   ['Ctrl/Cmd + Shift + Z', '重做'],
   ['Ctrl/Cmd + O', '导入文件'],
   ['Ctrl/Cmd + Shift + O', '导入文件夹'],
+  ['Ctrl/Cmd + V', '从剪贴板导入图片'],
   ['Ctrl/Cmd + E', '打开导出设置'],
   ['Ctrl/Cmd + ,', '打开设置'],
   ['Esc', '关闭说明或取消当前任务']
@@ -142,6 +208,45 @@ const readFileAsDataUrl = async (file: File): Promise<string> =>
     reader.onerror = () => reject(new Error('无法读取拖入文件。'))
     reader.readAsDataURL(file)
   })
+
+const getExtensionFromMimeType = (mimeType: string): string => {
+  const normalized = mimeType.toLowerCase()
+  switch (normalized) {
+    case 'image/gif':
+      return 'gif'
+    case 'image/jpeg':
+      return 'jpg'
+    case 'image/png':
+      return 'png'
+    case 'image/webp':
+      return 'webp'
+    default: {
+      const rawExtension = normalized.split('/')[1]?.split('+')[0]
+      return rawExtension && isSupportedDroppedFile(`file.${rawExtension}`) ? rawExtension : 'png'
+    }
+  }
+}
+
+const buildImportedPayloadFromFile = async (file: File, fallbackName?: string): Promise<ImportedFilePayload> => {
+  const derivedExtension = file.name.split('.').pop()?.toLowerCase()
+  const extension = derivedExtension && isSupportedDroppedFile(`file.${derivedExtension}`) ? derivedExtension : getExtensionFromMimeType(file.type)
+  const safeName = file.name || fallbackName || `imported-image.${extension}`
+
+  return {
+    dataUrl: await readFileAsDataUrl(file),
+    extension,
+    mimeType: file.type || `image/${extension}`,
+    name: safeName.includes('.') ? safeName : `${safeName}.${extension}`,
+    path: '',
+    size: file.size
+  }
+}
+
+const extractClipboardImageFiles = (clipboardData: DataTransfer | null): File[] =>
+  Array.from(clipboardData?.items ?? [])
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file))
 
 const isEditableTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) {
@@ -205,6 +310,77 @@ const getSheetGeometry = (sheet: SheetState): SheetGeometryState => {
     rows: sheet.rows
   }
 }
+
+const parsePositiveInteger = (value: string): number | null => {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const buildPendingSingleImageDraft = (
+  prompt: PendingSingleImageImportPrompt
+): PendingSingleImageImportDraft => ({
+  columns: String(prompt.columns || ''),
+  frameHeight: String(prompt.frameHeight || ''),
+  frameWidth: String(prompt.frameWidth || ''),
+  mode: 'grid',
+  rows: String(prompt.rows || '')
+})
+
+const getPendingSingleImageGeometry = (
+  prompt: PendingSingleImageImportPrompt,
+  draft: PendingSingleImageImportDraft
+): PendingSingleImageGeometry => {
+  if (draft.mode === 'cell') {
+    const frameWidth = parsePositiveInteger(draft.frameWidth) ?? 0
+    const frameHeight = parsePositiveInteger(draft.frameHeight) ?? 0
+    const rows = frameHeight > 0 ? Math.floor(prompt.sourceHeight / frameHeight) : 0
+    const columns = frameWidth > 0 ? Math.floor(prompt.sourceWidth / frameWidth) : 0
+    const canApply =
+      frameWidth > 0 &&
+      frameHeight > 0 &&
+      columns > 0 &&
+      rows > 0 &&
+      prompt.sourceWidth % frameWidth === 0 &&
+      prompt.sourceHeight % frameHeight === 0
+
+    return {
+      canApply,
+      columns,
+      frameHeight,
+      frameWidth,
+      mode: 'cell',
+      predictedFrameCount: Math.max(0, rows * columns),
+      rows
+    }
+  }
+
+  const rows = parsePositiveInteger(draft.rows) ?? 0
+  const columns = parsePositiveInteger(draft.columns) ?? 0
+  const { canApply, frameHeight, frameWidth } = getGridFrameMetrics(prompt.sourceWidth, prompt.sourceHeight, rows, columns)
+
+  return {
+    canApply,
+    columns,
+    frameHeight,
+    frameWidth,
+    mode: 'grid',
+    predictedFrameCount: Math.max(0, rows * columns),
+    rows
+  }
+}
+
+const matchesSheetImportGeometry = (session: ImportSession, geometry: SheetImportGeometry): boolean =>
+  session.sheet.mode === geometry.mode &&
+  session.sheet.rows === geometry.rows &&
+  session.sheet.columns === geometry.columns &&
+  session.sheet.frameWidth === geometry.frameWidth &&
+  session.sheet.frameHeight === geometry.frameHeight
+
+const isApproximateGridCandidate = (prompt: PendingSingleImageImportPrompt, candidate: GridCandidate): boolean =>
+  prompt.sourceWidth % candidate.columns !== 0 || prompt.sourceHeight % candidate.rows !== 0
+
+const formatGridCandidateDetail = (prompt: PendingSingleImageImportPrompt, candidate: GridCandidate): string =>
+  `${candidate.rows * candidate.columns} 帧 · ${isApproximateGridCandidate(prompt, candidate) ? '约 ' : ''}${candidate.frameWidth} x ${candidate.frameHeight}`
 
 const buildProgressState = (progress: TaskProgress): OperationProgressState => {
   const formattedCount =
@@ -328,7 +504,8 @@ const loadUiPreferences = (): UiPreferences => {
       drawerFixedMode:
         parsed.drawerFixedMode === 'left' || parsed.drawerFixedMode === 'right' || parsed.drawerFixedMode === 'both'
           ? parsed.drawerFixedMode
-          : DEFAULT_UI_PREFERENCES.drawerFixedMode
+          : DEFAULT_UI_PREFERENCES.drawerFixedMode,
+      photoshopPath: typeof parsed.photoshopPath === 'string' ? parsed.photoshopPath.trim() : DEFAULT_UI_PREFERENCES.photoshopPath
     }
   } catch {
     return DEFAULT_UI_PREFERENCES
@@ -470,6 +647,7 @@ export default function App() {
   const deleteSelectedFrames = useEditorStore((state) => state.deleteSelectedFrames)
   const moveFrame = useEditorStore((state) => state.moveFrame)
   const redo = useEditorStore((state) => state.redo)
+  const replaceFrame = useEditorStore((state) => state.replaceFrame)
   const replaceFrames = useEditorStore((state) => state.replaceFrames)
   const resetWorkspace = useEditorStore((state) => state.resetWorkspace)
   const reverseFrames = useEditorStore((state) => state.reverseFrames)
@@ -497,7 +675,13 @@ export default function App() {
   const [pingPongDirection, setPingPongDirection] = useState<1 | -1>(1)
   const [isWindowDragActive, setIsWindowDragActive] = useState(false)
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null)
+  const [pendingImportPrompt, setPendingImportPrompt] = useState<PendingImportPrompt | null>(null)
+  const [pendingSingleImageImportPrompt, setPendingSingleImageImportPrompt] = useState<PendingSingleImageImportPrompt | null>(null)
+  const [pendingSingleImageImportDraft, setPendingSingleImageImportDraft] = useState<PendingSingleImageImportDraft | null>(null)
+  const [isSingleImageManualEntryOpen, setIsSingleImageManualEntryOpen] = useState(false)
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => loadUiPreferences())
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(DEFAULT_UPDATE_STATUS)
+  const [isUpdateActionPending, setIsUpdateActionPending] = useState(false)
   const [persistedPlaybackPreferences] = useState<PersistedPlaybackPreferences>(() => loadPlaybackPreferences())
   const [persistedExportPreferences] = useState<PersistedExportPreferences>(() => loadExportPreferences())
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
@@ -506,16 +690,81 @@ export default function App() {
   const [resetViewNonce, setResetViewNonce] = useState(0)
   const [lastExportDirectory, setLastExportDirectory] = useState<string | null>(persistedExportPreferences.lastDirectory)
   const operationRef = useRef<OperationController | null>(null)
+  const pendingImportActionRef = useRef<((mode: ImportMode) => Promise<void>) | null>(null)
+  const pendingSingleImageImportRef = useRef<{ mode: ImportMode; session: ImportSession } | null>(null)
   const smokeFnsRef = useRef<SmokeBridge | null>(null)
   const drawerCloseTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
   const drawerOpenTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
   const drawerRefs = useRef<{ left: HTMLElement | null; right: HTMLElement | null }>({ left: null, right: null })
   const didHydratePersistentPreferencesRef = useRef(false)
+  const externalEditPollActiveRef = useRef(false)
+  const externalEditSessionsRef = useRef<Map<string, ExternalEditSession>>(new Map())
   const windowDragDepthRef = useRef(0)
+
+  useEffect(() => {
+    if (!pendingSingleImageImportPrompt) {
+      setPendingSingleImageImportDraft(null)
+      setIsSingleImageManualEntryOpen(false)
+      return
+    }
+
+    setPendingSingleImageImportDraft(buildPendingSingleImageDraft(pendingSingleImageImportPrompt))
+    setIsSingleImageManualEntryOpen(false)
+  }, [pendingSingleImageImportPrompt])
 
   const clearWindowDragState = useEffectEvent(() => {
     windowDragDepthRef.current = 0
     setIsWindowDragActive(false)
+  })
+
+  const pollExternalEditSessions = useEffectEvent(async () => {
+    if (externalEditPollActiveRef.current) {
+      return
+    }
+
+    const sessions = Array.from(externalEditSessionsRef.current.entries())
+    if (sessions.length === 0) {
+      return
+    }
+
+    externalEditPollActiveRef.current = true
+
+    try {
+      for (const [frameId, session] of sessions) {
+        const currentFrameForSession = frames.find((frame) => frame.id === frameId)
+        if (!currentFrameForSession) {
+          externalEditSessionsRef.current.delete(frameId)
+          continue
+        }
+
+        const modifiedTimeMs = await window.desktopApi.getFileModifiedTime(session.filePath)
+        if (modifiedTimeMs === null || modifiedTimeMs <= session.lastModifiedTimeMs + 1) {
+          continue
+        }
+
+        try {
+          const payloads = await window.desktopApi.loadFiles([session.filePath])
+          const payload = payloads[0]
+          if (!payload) {
+            throw new Error('无法读取 Photoshop 保存后的帧文件。')
+          }
+
+          const editedFrame = await filePayloadToFrame(payload, 'file')
+          replaceFrame(frameId, buildReinjectedFrame(currentFrameForSession, editedFrame, session.filePath))
+          session.lastFailedModifiedTimeMs = undefined
+          session.lastModifiedTimeMs = modifiedTimeMs
+          setStatusMessage(`已同步 Photoshop 修改：${currentFrameForSession.name}`)
+        } catch (error) {
+          if (session.lastFailedModifiedTimeMs !== modifiedTimeMs) {
+            session.lastFailedModifiedTimeMs = modifiedTimeMs
+            const message = error instanceof Error ? error.message : '重新载入 Photoshop 修改失败。'
+            setErrorMessage(`“${currentFrameForSession.name}”回灌失败：${message}`)
+          }
+        }
+      }
+    } finally {
+      externalEditPollActiveRef.current = false
+    }
   })
 
   const isDrawerFixed = (side: 'left' | 'right'): boolean =>
@@ -541,6 +790,17 @@ export default function App() {
 
   const recommendedLayout = recommendSheetLayout(exportFrames.length)
   const sheetGeometry = getSheetGeometry(sheet)
+  const pendingSingleImageGeometry = useMemo(
+    () =>
+      pendingSingleImageImportPrompt && pendingSingleImageImportDraft
+        ? getPendingSingleImageGeometry(pendingSingleImageImportPrompt, pendingSingleImageImportDraft)
+        : null,
+    [pendingSingleImageImportDraft, pendingSingleImageImportPrompt]
+  )
+  const modalSingleImageCandidates = useMemo(
+    () => pendingSingleImageImportPrompt?.candidates.slice(0, SINGLE_IMAGE_MODAL_CANDIDATE_LIMIT) ?? [],
+    [pendingSingleImageImportPrompt]
+  )
   const hasSheetSource = Boolean(sheet.source)
   const hasWorkspaceContent = frames.length > 0 || hasSheetSource
   const leftDrawerFixed = hasWorkspaceContent && isDrawerFixed('left')
@@ -549,6 +809,61 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(uiPreferences))
   }, [uiPreferences])
+
+  useEffect(() => {
+    let isCancelled = false
+
+    const loadUpdateStatus = async () => {
+      try {
+        const nextStatus = await window.desktopApi.getUpdateStatus()
+        if (!isCancelled) {
+          setUpdateStatus(nextStatus)
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          const message = error instanceof Error ? error.message : '无法读取更新状态。'
+          setUpdateStatus({
+            ...DEFAULT_UPDATE_STATUS,
+            message,
+            phase: 'error'
+          })
+        }
+      }
+    }
+
+    void loadUpdateStatus()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const liveFrameIds = new Set(frames.map((frame) => frame.id))
+
+    for (const frameId of Array.from(externalEditSessionsRef.current.keys())) {
+      if (!liveFrameIds.has(frameId)) {
+        externalEditSessionsRef.current.delete(frameId)
+      }
+    }
+  }, [frames])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void pollExternalEditSessions()
+    }, EXTERNAL_EDIT_POLL_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [pollExternalEditSessions])
+
+  useEffect(() => {
+    const editSessions = externalEditSessionsRef.current
+    return () => {
+      editSessions.clear()
+    }
+  }, [])
 
   useEffect(() => {
     if (didHydratePersistentPreferencesRef.current) {
@@ -713,6 +1028,148 @@ export default function App() {
     }))
   }
 
+  const runUpdateAction = useEffectEvent(async <T extends UpdateStatus | void>(action: () => Promise<T>): Promise<T | undefined> => {
+    setIsUpdateActionPending(true)
+
+    try {
+      const result = await action()
+      if (result) {
+        setUpdateStatus(result)
+        if (result.message) {
+          setStatusMessage(result.message)
+        }
+      }
+      return result
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '处理更新失败，请稍后重试。'
+      setErrorMessage(message)
+      return undefined
+    } finally {
+      setIsUpdateActionPending(false)
+    }
+  })
+
+  const handleCheckForUpdates = useEffectEvent(async () => {
+    await runUpdateAction(() => window.desktopApi.checkForAppUpdates())
+  })
+
+  const handleDownloadUpdate = useEffectEvent(async () => {
+    await runUpdateAction(() => window.desktopApi.downloadAppUpdate())
+  })
+
+  const handleInstallDownloadedUpdate = useEffectEvent(async () => {
+    setIsUpdateActionPending(true)
+
+    try {
+      setStatusMessage('正在准备安装更新，应用会自动重启。')
+      await window.desktopApi.installDownloadedUpdate()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '安装更新失败，请稍后重试。'
+      setErrorMessage(message)
+    } finally {
+      setIsUpdateActionPending(false)
+    }
+  })
+
+  const handleOpenUpdateDownloadPage = useEffectEvent(async () => {
+    setIsUpdateActionPending(true)
+
+    try {
+      await window.desktopApi.openUpdateDownloadPage()
+      setStatusMessage('已打开新版本下载页。')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法打开下载页。'
+      setErrorMessage(message)
+    } finally {
+      setIsUpdateActionPending(false)
+    }
+  })
+
+  const choosePhotoshopExecutable = useEffectEvent(async (): Promise<string | null> => {
+    try {
+      const selectedPath = await window.desktopApi.choosePhotoshopExecutable(uiPreferences.photoshopPath || undefined)
+      if (!selectedPath) {
+        return null
+      }
+
+      updateUiPreferences({ photoshopPath: selectedPath })
+      setStatusMessage('已更新 Photoshop 路径。')
+      return selectedPath
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法选择 Photoshop 可执行文件。'
+      setErrorMessage(message)
+      return null
+    }
+  })
+
+  const ensurePhotoshopPath = useEffectEvent(async (): Promise<string | null> => {
+    const configuredPath = uiPreferences.photoshopPath.trim()
+    if (configuredPath) {
+      return configuredPath
+    }
+
+    const selectedPath = await choosePhotoshopExecutable()
+    if (!selectedPath) {
+      setStatusMessage('已取消选择 Photoshop 路径。')
+    }
+
+    return selectedPath
+  })
+
+  const prepareExternalEditSession = useEffectEvent(async (frame: FrameItem): Promise<ExternalEditSession> => {
+    const existingSession = externalEditSessionsRef.current.get(frame.id)
+    if (existingSession) {
+      await window.desktopApi.writeBinaryFile({
+        data: Array.from(dataUrlToBytes(frame.dataUrl)),
+        filePath: existingSession.filePath
+      })
+      const latestModifiedTimeMs = await window.desktopApi.getFileModifiedTime(existingSession.filePath)
+      if (latestModifiedTimeMs !== null) {
+        existingSession.lastModifiedTimeMs = Math.max(existingSession.lastModifiedTimeMs, latestModifiedTimeMs)
+      }
+      return existingSession
+    }
+
+    const tempFile = await window.desktopApi.createTempBinaryFile({
+      data: Array.from(dataUrlToBytes(frame.dataUrl)),
+      extension: 'png',
+      fileName: buildExternalEditTempFileName(frame)
+    })
+
+    const session: ExternalEditSession = {
+      filePath: tempFile.filePath,
+      lastModifiedTimeMs: tempFile.modifiedTimeMs
+    }
+    externalEditSessionsRef.current.set(frame.id, session)
+    return session
+  })
+
+  const handleEditFrameInPhotoshop = useEffectEvent(async (frame: FrameItem) => {
+    const frameIndex = frames.findIndex((item) => item.id === frame.id)
+    if (frameIndex !== -1) {
+      setIsPlaying(false)
+      setCurrentFrame(frameIndex)
+      setSelectedFrames([frame.id], frame.id)
+    }
+
+    const photoshopPath = await ensurePhotoshopPath()
+    if (!photoshopPath) {
+      return
+    }
+
+    try {
+      const session = await prepareExternalEditSession(frame)
+      await window.desktopApi.openInPhotoshop({
+        filePath: session.filePath,
+        photoshopPath
+      })
+      setStatusMessage(`已在 Photoshop 中打开“${frame.name}”，保存后会自动回灌到当前帧。`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法在 Photoshop 中打开当前帧。'
+      setErrorMessage(message)
+    }
+  })
+
   const handleDrawerBlur = useEffectEvent(
     (side: 'left' | 'right', currentTarget: HTMLElement, relatedTarget: EventTarget | null) => {
       if (relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
@@ -844,24 +1301,64 @@ export default function App() {
     }
   }
 
-  const importPayloads = async (payloads: ImportedFilePayload[], controller: OperationController): Promise<void> => {
-    ensureOperationActive(controller)
+  const applyImportedSession = (session: ImportSession, mode: ImportMode): void => {
+    if (mode === 'append' && frames.length > 0) {
+      const nextFrames = [...frames, ...session.frames]
+      const firstImportedFrame = session.frames[0]
 
-    if (payloads.length === 0) {
-      setStatusMessage('没有找到可导入的图片或 GIF。')
+      replaceFrames(nextFrames, {
+        playbackPatch: {
+          currentFrame: frames.length,
+          endFrame: Math.max(0, nextFrames.length - 1),
+          isPlaying: nextFrames.length > 1 ? playback.isPlaying || session.playback.isPlaying : false
+        },
+        recordHistory: true,
+        sheet: createEmptySheetState()
+      })
+
+      if (firstImportedFrame) {
+        setSelectedFrames([firstImportedFrame.id], firstImportedFrame.id)
+      }
+
+      setStatusMessage(`已将这次导入的 ${session.frames.length} 帧追加到当前序列。`)
+      setAppliedSheetGeometrySignature(null)
+      setPingPongDirection(1)
       return
     }
 
-    const session = await buildImportSession(payloads, async (progress) => {
-      await updateOperationProgress(controller, progress)
-    })
+    if (mode === 'replace-current' && frames.length > 0) {
+      const anchorIndex = Math.max(0, Math.min(playback.currentFrame, frames.length - 1))
+      const nextFrames = [...frames.slice(0, anchorIndex), ...session.frames, ...frames.slice(anchorIndex + 1)]
+      const importedFrameIds = session.frames.map((frame) => frame.id)
+      const firstImportedFrameId = importedFrameIds[0] ?? null
 
-    ensureOperationActive(controller)
+      replaceFrames(nextFrames, {
+        playbackPatch: {
+          currentFrame: Math.min(anchorIndex, Math.max(0, nextFrames.length - 1)),
+          endFrame: Math.max(0, nextFrames.length - 1),
+          isPlaying: nextFrames.length > 1 ? playback.isPlaying || session.playback.isPlaying : false
+        },
+        recordHistory: true,
+        sheet: createEmptySheetState()
+      })
+
+      if (firstImportedFrameId) {
+        setSelectedFrames(importedFrameIds, importedFrameIds.at(-1) ?? firstImportedFrameId)
+      }
+
+      setStatusMessage(
+        session.frames.length > 1 ? `已从当前帧开始替换，并插入 ${session.frames.length} 帧。` : '已替换当前帧。'
+      )
+      setAppliedSheetGeometrySignature(null)
+      setPingPongDirection(1)
+      return
+    }
+
     applyImportSession(session)
     updatePlaybackSettings(
       {
         background: playback.background,
-        fps: payloads.length === 1 && payloads[0]?.extension === 'gif' ? session.playback.fps : playback.fps,
+        fps: session.sheet.autoApplied || (session.frames.length === 1 && session.sheet.source?.extension === 'gif') ? session.playback.fps : playback.fps,
         loopMode: playback.loopMode,
         previewSkip: playback.previewSkip,
         reverse: playback.reverse,
@@ -873,6 +1370,36 @@ export default function App() {
       session.sheet.autoApplied ? buildSheetGeometrySignature(session.sheet.source, getSheetGeometry(session.sheet)) : null
     )
     setPingPongDirection(1)
+  }
+
+  const importPayloads = async (
+    payloads: ImportedFilePayload[],
+    controller: OperationController,
+    mode: ImportMode = 'replace'
+  ): Promise<void> => {
+    ensureOperationActive(controller)
+
+    if (payloads.length === 0) {
+      setStatusMessage('没有找到可导入的图片文件。')
+      return
+    }
+
+    const session = await buildImportSession(payloads, async (progress) => {
+      await updateOperationProgress(controller, progress)
+    })
+    const eagerPrompt =
+      !session.importPrompt && mode === 'replace' && frames.length > 0
+        ? buildSingleImageImportPromptFromSheet(session.sheet, EAGER_SINGLE_IMAGE_PROMPT_CONFIDENCE)
+        : undefined
+
+    ensureOperationActive(controller)
+    if (session.importPrompt ?? eagerPrompt) {
+      pendingSingleImageImportRef.current = { mode, session }
+      setPendingSingleImageImportPrompt(session.importPrompt ?? eagerPrompt ?? null)
+      return
+    }
+
+    applyImportedSession(session, mode)
   }
 
   const exportFramesToDirectory = async (
@@ -943,7 +1470,7 @@ export default function App() {
     await window.desktopApi.deletePaths(writtenPaths)
   }
 
-  const importPaths = async (paths: string[]): Promise<void> => {
+  const importPaths = async (paths: string[], mode: ImportMode = 'replace'): Promise<void> => {
     const uniquePaths = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)))
     if (uniquePaths.length === 0) {
       return
@@ -959,18 +1486,18 @@ export default function App() {
       async (controller) => {
         const payloads = await window.desktopApi.loadPaths(uniquePaths)
         ensureOperationActive(controller)
-        await importPayloads(payloads, controller)
+        await importPayloads(payloads, controller, mode)
       },
       '已取消导入。'
     )
   }
 
-  const importDroppedFiles = async (files: File[]): Promise<void> => {
+  const importDroppedFiles = async (files: File[], mode: ImportMode = 'replace'): Promise<void> => {
     clearWindowDragState()
 
     const supportedFiles = files.filter((file) => isSupportedDroppedFile(file.name))
     if (supportedFiles.length === 0) {
-      setStatusMessage('拖入内容里没有支持的图片或 GIF。')
+      setStatusMessage('拖入内容里没有支持的图片文件。')
       return
     }
 
@@ -979,7 +1506,7 @@ export default function App() {
       .filter((value): value is string => Boolean(value))
 
     if (resolvedPaths.length === supportedFiles.length && resolvedPaths.length > 0) {
-      await importPaths(resolvedPaths)
+      await importPaths(resolvedPaths, mode)
       return
     }
 
@@ -1004,22 +1531,130 @@ export default function App() {
             title: '正在导入资源'
           })
 
-          const extension = file.name.split('.').pop()?.toLowerCase() ?? 'png'
-          payloads.push({
-            dataUrl: await readFileAsDataUrl(file),
-            extension,
-            mimeType: file.type || `image/${extension}`,
-            name: file.name,
-            path: '',
-            size: file.size
-          })
+          payloads.push(await buildImportedPayloadFromFile(file))
         }
 
-        await importPayloads(payloads, controller)
+        await importPayloads(payloads, controller, mode)
       },
       '已取消导入。'
     )
   }
+
+  const requestImportMode = useEffectEvent((sourceLabel: string, runImport: (mode: ImportMode) => Promise<void>) => {
+    if (frames.length === 0) {
+      void runImport('replace')
+      return
+    }
+
+    pendingImportActionRef.current = runImport
+    setPendingImportPrompt({
+      currentFrameCount: frames.length,
+      currentFrameIndex: playback.currentFrame + 1,
+      sourceLabel
+    })
+  })
+
+  const closePendingImportPrompt = useEffectEvent((cancelled = false) => {
+    pendingImportActionRef.current = null
+    setPendingImportPrompt(null)
+    if (cancelled) {
+      setStatusMessage('已取消这次导入。')
+    }
+  })
+
+  const closePendingSingleImageImportPrompt = useEffectEvent((cancelled = false) => {
+    pendingSingleImageImportRef.current = null
+    setPendingSingleImageImportPrompt(null)
+    setPendingSingleImageImportDraft(null)
+    setIsSingleImageManualEntryOpen(false)
+    if (cancelled) {
+      setStatusMessage('已取消这次导入。')
+    }
+  })
+
+  const handleImportDecision = useEffectEvent((mode: ImportMode) => {
+    const pendingAction = pendingImportActionRef.current
+    pendingImportActionRef.current = null
+    setPendingImportPrompt(null)
+    if (!pendingAction) {
+      return
+    }
+
+    void pendingAction(mode)
+  })
+
+  const handleSingleImageImportDecision = useEffectEvent(
+    (decision: { type: 'single' } | { geometry?: SheetImportGeometry; type: 'sheet' }) => {
+      const pendingImport = pendingSingleImageImportRef.current
+      pendingSingleImageImportRef.current = null
+      setPendingSingleImageImportPrompt(null)
+      setPendingSingleImageImportDraft(null)
+      setIsSingleImageManualEntryOpen(false)
+      if (!pendingImport) {
+        return
+      }
+
+      if (decision.type === 'sheet') {
+        const targetGeometry =
+          decision.geometry ?? {
+            columns: pendingImport.session.sheet.columns,
+            frameHeight: pendingImport.session.sheet.frameHeight,
+            frameWidth: pendingImport.session.sheet.frameWidth,
+            mode: pendingImport.session.sheet.mode,
+            rows: pendingImport.session.sheet.rows
+          }
+
+        if (matchesSheetImportGeometry(pendingImport.session, targetGeometry)) {
+          applyImportedSession(pendingImport.session, pendingImport.mode)
+          if (pendingImport.mode === 'replace') {
+            setStatusMessage(`已按 ${targetGeometry.columns} x ${targetGeometry.rows} 序列导入，共 ${pendingImport.session.frames.length} 帧。`)
+          }
+          return
+        }
+
+        void withOperation(
+          {
+            cancellable: false,
+            detail: '正在按选定方案准备导入...',
+            percent: null,
+            title: '正在导入资源'
+          },
+          async (controller) => {
+            ensureOperationActive(controller)
+            const sheetSession = await buildSheetImportSession(pendingImport.session, targetGeometry, async (progress) => {
+              await updateOperationProgress(controller, progress)
+            })
+            ensureOperationActive(controller)
+            applyImportedSession(sheetSession, pendingImport.mode)
+            if (pendingImport.mode === 'replace') {
+              setStatusMessage(`已按 ${targetGeometry.columns} x ${targetGeometry.rows} 序列导入，共 ${sheetSession.frames.length} 帧。`)
+            }
+          },
+          '已取消导入。'
+        )
+        return
+      }
+
+      void withOperation(
+        {
+          cancellable: false,
+          detail: '正在按单帧准备导入...',
+          percent: null,
+          title: '正在导入资源'
+        },
+        async (controller) => {
+          ensureOperationActive(controller)
+          const singleFrameSession = await buildSingleFrameImportSession(pendingImport.session)
+          ensureOperationActive(controller)
+          applyImportedSession(singleFrameSession, pendingImport.mode)
+          if (pendingImport.mode === 'replace') {
+            setStatusMessage('已按单帧导入。右侧仍保留图集识别结果，随时可以再应用到时间轴。')
+          }
+        },
+        '已取消导入。'
+      )
+    }
+  )
 
   const handleImportFiles = async (): Promise<void> => {
     const paths = await window.desktopApi.openFiles()
@@ -1027,7 +1662,9 @@ export default function App() {
       return
     }
 
-    await importPaths(paths)
+    requestImportMode('选中的文件', async (mode) => {
+      await importPaths(paths, mode)
+    })
   }
 
   const handleImportFolder = async (): Promise<void> => {
@@ -1036,8 +1673,85 @@ export default function App() {
       return
     }
 
-    await importPaths([directory])
+    requestImportMode('选中的文件夹', async (mode) => {
+      await importPaths([directory], mode)
+    })
   }
+
+  const handleReplaceCurrentFrameImport = async (): Promise<void> => {
+    if (frames.length === 0) {
+      return
+    }
+
+    const paths = await window.desktopApi.openFiles()
+    if (!paths || paths.length === 0) {
+      return
+    }
+
+    await importPaths(paths, 'replace-current')
+  }
+
+  const handleReplaceSpecificFrameImport = async (frameId: string): Promise<void> => {
+    const frameIndex = frames.findIndex((frame) => frame.id === frameId)
+    if (frameIndex === -1) {
+      return
+    }
+
+    setCurrentFrame(frameIndex)
+    setSelectedFrames([frameId], frameId)
+    await handleReplaceCurrentFrameImport()
+  }
+
+  const handlePastePayloads = useEffectEvent((payloadsOrFiles: { files: File[] } | { payloads: ImportedFilePayload[] }) => {
+    requestImportMode('剪贴板中的图片', async (mode) => {
+      await withOperation(
+        {
+          cancellable: true,
+          detail: '正在读取剪贴板图片...',
+          percent: null,
+          title: '正在导入资源'
+        },
+        async (controller) => {
+          const payloads: ImportedFilePayload[] = []
+
+          if ('payloads' in payloadsOrFiles) {
+            payloads.push(...payloadsOrFiles.payloads)
+            await updateOperationProgress(controller, {
+              cancellable: true,
+              current: payloads.length,
+              detail: `正在读取剪贴板图片 (${payloads.length}/${payloads.length})`,
+              percent: 20,
+              stage: 'convert-files',
+              total: payloads.length
+            })
+          } else {
+            const { files } = payloadsOrFiles
+
+            for (let index = 0; index < files.length; index += 1) {
+              ensureOperationActive(controller)
+              const file = files[index]
+              const extension = getExtensionFromMimeType(file.type)
+              payloads.push(
+                await buildImportedPayloadFromFile(file, `pasted-image-${Date.now()}-${index + 1}.${extension}`)
+              )
+
+              await updateOperationProgress(controller, {
+                cancellable: true,
+                current: index + 1,
+                detail: `正在读取剪贴板图片 (${index + 1}/${files.length})`,
+                percent: ((index + 1) / files.length) * 20,
+                stage: 'convert-files',
+                total: files.length
+              })
+            }
+          }
+
+          await importPayloads(payloads, controller, mode)
+        },
+        '已取消导入。'
+      )
+    })
+  })
 
   const handleUpdateSheet = (patch: Partial<SheetState>, recordHistory = true): void => {
     updateSheetSettings(
@@ -1060,7 +1774,7 @@ export default function App() {
       },
       false
     )
-    setStatusMessage(`已切换到候选网格 ${candidate.rows} x ${candidate.columns}。`)
+    setStatusMessage(`已切换到候选网格 ${candidate.columns} x ${candidate.rows}。`)
   }
 
   const handleApplySheet = async (geometryOverride?: SheetGeometryState): Promise<void> => {
@@ -1111,7 +1825,7 @@ export default function App() {
         })
         setAppliedSheetGeometrySignature(buildSheetGeometrySignature(source, geometry))
         setPingPongDirection(1)
-        setStatusMessage(`已按 ${geometry.rows} x ${geometry.columns} 拆分为 ${nextFrames.length} 帧。`)
+        setStatusMessage(`已按 ${geometry.columns} x ${geometry.rows} 拆分为 ${nextFrames.length} 帧。`)
       },
       '已取消拆分。'
     )
@@ -1289,7 +2003,7 @@ export default function App() {
     await withOperation(
       {
         cancellable: true,
-        detail: `正在按 ${layout.rows} x ${layout.columns} 合并帧...`,
+        detail: `正在按 ${layout.columns} x ${layout.rows} 合并帧...`,
         percent: 0,
         title: '正在导出序列图'
       },
@@ -1449,6 +2163,26 @@ export default function App() {
       return
     }
 
+    if (event.key === 'Escape' && pendingSingleImageImportPrompt) {
+      event.preventDefault()
+      closePendingSingleImageImportPrompt(true)
+      return
+    }
+
+    if (pendingSingleImageImportPrompt) {
+      return
+    }
+
+    if (event.key === 'Escape' && pendingImportPrompt) {
+      event.preventDefault()
+      closePendingImportPrompt(true)
+      return
+    }
+
+    if (pendingImportPrompt) {
+      return
+    }
+
     if (event.key === 'Escape' && isBusy) {
       event.preventDefault()
       cancelCurrentOperation()
@@ -1574,6 +2308,36 @@ export default function App() {
     }
   }, [handleGlobalKeydown])
 
+  const handleWindowPaste = useEffectEvent((event: ClipboardEvent) => {
+    if (isBusy || pendingImportPrompt || pendingSingleImageImportPrompt || isEditableTarget(event.target)) {
+      return
+    }
+
+    const pastedFiles = extractClipboardImageFiles(event.clipboardData)
+    void (async () => {
+      const nativeClipboardPayload = await window.desktopApi.readClipboardImage().catch(() => null)
+      if (nativeClipboardPayload) {
+        event.preventDefault()
+        handlePastePayloads({ payloads: [nativeClipboardPayload] })
+        return
+      }
+
+      if (pastedFiles.length === 0) {
+        return
+      }
+
+      event.preventDefault()
+      handlePastePayloads({ files: pastedFiles })
+    })()
+  })
+
+  useEffect(() => {
+    window.addEventListener('paste', handleWindowPaste)
+    return () => {
+      window.removeEventListener('paste', handleWindowPaste)
+    }
+  }, [handleWindowPaste])
+
   const advancePlayback = useEffectEvent(() => {
     if (playbackSequence.length === 0) {
       return
@@ -1617,7 +2381,9 @@ export default function App() {
   }, [playback.reverse, playbackSequence.length])
 
   const handleWindowDrop = useEffectEvent((files: File[]) => {
-    void importDroppedFiles(files)
+    requestImportMode('拖入的图片', async (mode) => {
+      await importDroppedFiles(files, mode)
+    })
   })
 
   useEffect(() => {
@@ -1838,14 +2604,13 @@ export default function App() {
                   {leftDrawerFixed ? '已固定' : '固定'}
                 </button>
               </div>
-              <SheetPanel
-                appliedGeometrySignature={appliedSheetGeometrySignature}
-                canApply={sheetGeometry.canApply}
-                columns={sheetGeometry.columns}
-                exportSettings={exportSettings}
-                frameHeight={sheetGeometry.frameHeight}
-                frameWidth={sheetGeometry.frameWidth}
-                isBusy={isBusy}
+                <SheetPanel
+                  appliedGeometrySignature={appliedSheetGeometrySignature}
+                  canApply={sheetGeometry.canApply}
+                  columns={sheetGeometry.columns}
+                  frameHeight={sheetGeometry.frameHeight}
+                  frameWidth={sheetGeometry.frameWidth}
+                  isBusy={isBusy}
                 onApply={(geometry) => {
                   void handleApplySheet(geometry)
                 }}
@@ -1925,6 +2690,12 @@ export default function App() {
                   background={playback.background}
                   canClearWorkspace={canClear}
                   frame={currentFrame}
+                  onEditFrameInPhotoshop={(frame) => {
+                    void handleEditFrameInPhotoshop(frame)
+                  }}
+                  onReplaceCurrentFrame={(frame) => {
+                    void handleReplaceSpecificFrameImport(frame.id)
+                  }}
                   onRequestClearWorkspace={handleClearWorkspace}
                   resetViewNonce={resetViewNonce}
                   onZoomChange={(zoom) => updatePlaybackSettings({ zoom }, false)}
@@ -2131,7 +2902,13 @@ export default function App() {
           <FrameTimeline
             currentFrame={playback.currentFrame}
             frames={frames}
+            onEditFrameInPhotoshop={(frame) => {
+              void handleEditFrameInPhotoshop(frame)
+            }}
             onMoveFrame={moveFrame}
+            onReplaceCurrentFrame={(frame) => {
+              void handleReplaceSpecificFrameImport(frame.id)
+            }}
             onSelectFrame={selectFrame}
             selectedFrameIds={selectedFrameIds}
           />
@@ -2210,11 +2987,315 @@ export default function App() {
         </div>
       ) : null}
 
+      {pendingImportPrompt ? (
+        <div className="modal-overlay" onClick={() => closePendingImportPrompt(false)}>
+          <div
+            className="modal-card settings-modal-card"
+            onClick={(event) => {
+              event.stopPropagation()
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">导入方式</span>
+                <h2>导入到当前序列？</h2>
+              </div>
+              <button className="secondary-button" onClick={() => closePendingImportPrompt(false)} type="button">
+                取消
+              </button>
+            </div>
+
+            <div className="hint-card">
+              <span className="eyebrow">当前画布</span>
+              <p>
+                当前时间轴里已经有 {pendingImportPrompt.currentFrameCount} 帧。
+                <br />
+                这次要导入的是{pendingImportPrompt.sourceLabel}，你可以把它们追加到当前序列、替换第 {pendingImportPrompt.currentFrameIndex}{' '}
+                帧，或者先清空当前画布再重新导入。
+              </p>
+            </div>
+
+            <div className="button-grid action-grid-three">
+              <button className="primary-button" onClick={() => handleImportDecision('append')} type="button">
+                追加到当前序列
+              </button>
+              <button className="secondary-button" onClick={() => handleImportDecision('replace-current')} type="button">
+                替换当前帧
+              </button>
+              <button className="secondary-button" onClick={() => handleImportDecision('replace')} type="button">
+                清空后重新导入
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingSingleImageImportPrompt ? (
+        <div className="modal-overlay">
+          <div
+            className="modal-card recognition-modal-card"
+            onClick={(event) => {
+              event.stopPropagation()
+            }}
+          >
+            <div className="modal-header">
+              <div className="recognition-modal-heading">
+                <h2>这张图片如何导入？</h2>
+              </div>
+              <button className="secondary-button" onClick={() => closePendingSingleImageImportPrompt(false)} type="button">
+                取消
+              </button>
+            </div>
+
+            <div className="hint-card">
+              <span className="eyebrow">推荐结果</span>
+              <p>
+                推荐把 {pendingSingleImageImportPrompt.sourceName} 当作 {pendingSingleImageImportPrompt.columns} x{' '}
+                {pendingSingleImageImportPrompt.rows} 的序列图导入，预计会拆成 {pendingSingleImageImportPrompt.frameCount} 帧。
+                <br />
+                你也可以先自己决定拆法，或者改选其他候选方案后再导入。
+              </p>
+            </div>
+
+            <button
+              className="secondary-button recognition-option-button full-width-button"
+              onClick={() => handleSingleImageImportDecision({ type: 'single' })}
+              type="button"
+            >
+              <span className="recognition-option-topline">
+                <span className="recognition-option-title">先按单帧导入</span>
+                <span className="recognition-action-label">点击导入</span>
+              </span>
+              <span className="recognition-option-detail">不拆帧导入；右侧会保留识别结果，之后仍然可以一键应用为序列。</span>
+            </button>
+
+            <div className="control-block recognition-manual-block">
+              <button
+                className="secondary-button recognition-manual-trigger"
+                onClick={() => setIsSingleImageManualEntryOpen((current) => !current)}
+                type="button"
+              >
+                <span className="recognition-option-topline">
+                  <span className="recognition-manual-title-row">
+                    <span className="eyebrow">手动输入</span>
+                    <span className="recognition-option-title">自己决定拆法</span>
+                  </span>
+                  <span className="recognition-action-label">{isSingleImageManualEntryOpen ? '点击收起' : '点击展开'}</span>
+                </span>
+                <span className="recognition-option-detail">
+                  需要精确指定时，可以直接输入列数 / 行数，或者输入帧宽 / 帧高来导入。
+                </span>
+              </button>
+
+              {isSingleImageManualEntryOpen && pendingSingleImageImportDraft && pendingSingleImageGeometry ? (
+                <div className="recognition-manual-card">
+                  <div className="toggle-group">
+                    <button
+                      className={pendingSingleImageImportDraft.mode === 'grid' ? 'toggle-button active' : 'toggle-button'}
+                      onClick={() =>
+                        setPendingSingleImageImportDraft((current) => (current ? { ...current, mode: 'grid' } : current))
+                      }
+                      type="button"
+                    >
+                      列行方式
+                    </button>
+                    <button
+                      className={pendingSingleImageImportDraft.mode === 'cell' ? 'toggle-button active' : 'toggle-button'}
+                      onClick={() =>
+                        setPendingSingleImageImportDraft((current) => (current ? { ...current, mode: 'cell' } : current))
+                      }
+                      type="button"
+                    >
+                      帧尺寸方式
+                    </button>
+                  </div>
+
+                  {pendingSingleImageImportDraft.mode === 'grid' ? (
+                    <div className="form-grid">
+                      <label>
+                        列
+                        <input
+                          className="number-input"
+                          min={1}
+                          onChange={(event) =>
+                            setPendingSingleImageImportDraft((current) => (current ? { ...current, columns: event.target.value } : current))
+                          }
+                          type="number"
+                          value={pendingSingleImageImportDraft.columns}
+                        />
+                      </label>
+                      <label>
+                        行
+                        <input
+                          className="number-input"
+                          min={1}
+                          onChange={(event) =>
+                            setPendingSingleImageImportDraft((current) => (current ? { ...current, rows: event.target.value } : current))
+                          }
+                          type="number"
+                          value={pendingSingleImageImportDraft.rows}
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="form-grid">
+                      <label>
+                        帧宽
+                        <input
+                          className="number-input"
+                          min={1}
+                          onChange={(event) =>
+                            setPendingSingleImageImportDraft((current) =>
+                              current ? { ...current, frameWidth: event.target.value } : current
+                            )
+                          }
+                          type="number"
+                          value={pendingSingleImageImportDraft.frameWidth}
+                        />
+                      </label>
+                      <label>
+                        帧高
+                        <input
+                          className="number-input"
+                          min={1}
+                          onChange={(event) =>
+                            setPendingSingleImageImportDraft((current) =>
+                              current ? { ...current, frameHeight: event.target.value } : current
+                            )
+                          }
+                          type="number"
+                          value={pendingSingleImageImportDraft.frameHeight}
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <span>帧尺寸</span>
+                      <strong>
+                        {pendingSingleImageGeometry.frameWidth} x {pendingSingleImageGeometry.frameHeight}
+                      </strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>预计帧数</span>
+                      <strong>{pendingSingleImageGeometry.predictedFrameCount}</strong>
+                    </div>
+                  </div>
+
+                  <p className="muted-copy">
+                    {pendingSingleImageGeometry.canApply
+                      ? '将按这组参数直接导入为序列。'
+                      : pendingSingleImageImportDraft.mode === 'cell'
+                        ? '帧尺寸方式目前要求能整除原图。'
+                        : '请输入有效的列数和行数。'}
+                  </p>
+
+                  <button
+                    className="secondary-button full-width-button"
+                    disabled={!pendingSingleImageGeometry.canApply}
+                    onClick={() =>
+                      handleSingleImageImportDecision({
+                        geometry: {
+                          columns: pendingSingleImageGeometry.columns,
+                          frameHeight: pendingSingleImageGeometry.frameHeight,
+                          frameWidth: pendingSingleImageGeometry.frameWidth,
+                          mode: pendingSingleImageGeometry.mode,
+                          rows: pendingSingleImageGeometry.rows
+                        },
+                        type: 'sheet'
+                      })
+                    }
+                    type="button"
+                  >
+                    按手动输入导入
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="control-block">
+              <div className="section-heading compact">
+                <span className="eyebrow">候选方案</span>
+                <h3>直接导入为序列</h3>
+              </div>
+
+              <div className="recognition-candidate-grid">
+                {modalSingleImageCandidates.map((candidate) => {
+                  const isRecommended =
+                    candidate.rows === pendingSingleImageImportPrompt.rows && candidate.columns === pendingSingleImageImportPrompt.columns
+
+                  return (
+                    <button
+                      key={`${candidate.rows}x${candidate.columns}`}
+                      className={`secondary-button recognition-option-button${isRecommended ? ' recognition-option-recommended' : ''}`}
+                      onClick={() =>
+                        handleSingleImageImportDecision({
+                          geometry: {
+                            columns: candidate.columns,
+                            frameHeight: candidate.frameHeight,
+                            frameWidth: candidate.frameWidth,
+                            mode: 'grid',
+                            rows: candidate.rows
+                          },
+                          type: 'sheet'
+                        })
+                      }
+                      type="button"
+                    >
+                      <span className="recognition-option-topline">
+                        <span className="recognition-option-title">
+                          {candidate.columns} x {candidate.rows}
+                        </span>
+                        <span className="recognition-option-actions">
+                          {isRecommended ? <span className="recognition-badge">推荐</span> : null}
+                          <span className="recognition-action-label">点击导入</span>
+                        </span>
+                      </span>
+                      <span className="recognition-option-detail">
+                        {formatGridCandidateDetail(pendingSingleImageImportPrompt, candidate)}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {pendingSingleImageImportPrompt.candidates.length > modalSingleImageCandidates.length ? (
+                <p className="muted-copy">
+                  这里先显示最常用的 {modalSingleImageCandidates.length} 个候选；更多方案仍然可以在右侧候选列表里继续切换。
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <SettingsPanel
         isOpen={isSettingsOpen}
+        isUpdateActionPending={isUpdateActionPending}
+        onCheckForUpdates={() => {
+          void handleCheckForUpdates()
+        }}
+        onChoosePhotoshopPath={() => {
+          void choosePhotoshopExecutable()
+        }}
+        onClearPhotoshopPath={() => {
+          updateUiPreferences({ photoshopPath: '' })
+          setStatusMessage('已清空 Photoshop 路径。')
+        }}
         onClose={() => setIsSettingsOpen(false)}
+        onDownloadUpdate={() => {
+          void handleDownloadUpdate()
+        }}
+        onInstallDownloadedUpdate={() => {
+          void handleInstallDownloadedUpdate()
+        }}
+        onOpenUpdateDownloadPage={() => {
+          void handleOpenUpdateDownloadPage()
+        }}
         onUpdate={updateUiPreferences}
         preferences={uiPreferences}
+        updateStatus={updateStatus}
       />
 
       {exportNotice ? (
@@ -2238,7 +3319,7 @@ export default function App() {
         <div className="drop-overlay">
           <div className="drop-overlay-card">
             <strong>松开即可导入</strong>
-            <span>支持图片、GIF 和文件夹。规则序列图会尽量自动识别，并在置信度足够时直接开始播放。</span>
+            <span>支持图片、GIF 和文件夹。检测到可能是序列图时，会先让你选择按单帧还是按序列导入。</span>
           </div>
         </div>
       ) : null}

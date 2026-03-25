@@ -11,6 +11,8 @@ interface PreviewStageProps {
   background: BackgroundMode
   canClearWorkspace?: boolean
   frame?: FrameItem
+  onEditFrameInPhotoshop?: (frame: FrameItem) => void
+  onReplaceCurrentFrame?: (frame: FrameItem) => void
   onRequestClearWorkspace?: () => void
   resetViewNonce?: number
   onZoomChange?: (zoom: number) => void
@@ -44,6 +46,8 @@ export function PreviewStage({
   background,
   canClearWorkspace = false,
   frame,
+  onEditFrameInPhotoshop,
+  onReplaceCurrentFrame,
   onRequestClearWorkspace,
   resetViewNonce = 0,
   onZoomChange,
@@ -259,6 +263,32 @@ export function PreviewStage({
                   }}
                 >
                   复制到剪贴板
+                </ContextMenu.Item>
+                <ContextMenu.Item
+                  className="ContextMenuItem"
+                  disabled={!frame || !onEditFrameInPhotoshop}
+                  onSelect={() => {
+                    if (!frame || !onEditFrameInPhotoshop) {
+                      return
+                    }
+
+                    onEditFrameInPhotoshop(frame)
+                  }}
+                >
+                  用 Photoshop 修改当前帧...
+                </ContextMenu.Item>
+                <ContextMenu.Item
+                  className="ContextMenuItem"
+                  disabled={!frame || !onReplaceCurrentFrame}
+                  onSelect={() => {
+                    if (!frame || !onReplaceCurrentFrame) {
+                      return
+                    }
+
+                    onReplaceCurrentFrame(frame)
+                  }}
+                >
+                  导入并替换当前帧...
                 </ContextMenu.Item>
 
                 <ContextMenu.Sub>

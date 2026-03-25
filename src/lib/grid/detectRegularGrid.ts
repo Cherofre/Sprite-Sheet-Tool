@@ -6,7 +6,8 @@ const COMMON_SQUARE_GRIDS = new Set([2, 3, 4, 5, 6, 8, 10, 12, 16])
 const GRID_HINT_PATTERN = /(\d{1,2})\s*[xX*]\s*(\d{1,2})/
 const EPSILON = 0.0001
 const MAX_AUTO_DIVISIONS = 24
-const PRIORITY_SQUARE_GRIDS = [5, 6]
+const PRE_RANK_CANDIDATE_LIMIT = 16
+const PRIORITY_SQUARE_GRIDS = [5, 6, 7]
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value))
 
@@ -56,6 +57,7 @@ const buildGridCandidate = (
   const sizeLabel = approximate ? `~${frameWidth} x ${frameHeight}` : `${frameWidth} x ${frameHeight}`
 
   return {
+    approximate,
     columns,
     confidence,
     frameHeight,
@@ -84,7 +86,7 @@ export const detectRegularGrid = (sourceWidth: number, sourceHeight: number, max
   }
 
   const sortedCandidates = candidates.sort((left, right) => right.score - left.score)
-  const selectedCandidates = sortedCandidates.slice(0, GRID_CANDIDATE_LIMIT)
+  const selectedCandidates = sortedCandidates.slice(0, PRE_RANK_CANDIDATE_LIMIT)
 
   for (const size of PRIORITY_SQUARE_GRIDS) {
     if (selectedCandidates.some((candidate) => candidate.rows === size && candidate.columns === size)) {
@@ -295,6 +297,11 @@ export const shouldAutoApplyGrid = (candidates: GridCandidate[]): boolean => {
 
   const gap = best.score - (second?.score ?? best.score - 0.2)
   const commonSquare = best.rows === best.columns && COMMON_SQUARE_GRIDS.has(best.rows)
+  const denseApproximateGrid = best.approximate && best.rows * best.columns > 64
+
+  if (denseApproximateGrid) {
+    return false
+  }
 
   return best.confidence >= 0.8 && (gap >= 0.08 || commonSquare)
 }

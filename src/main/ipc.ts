@@ -1,15 +1,28 @@
+import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
-import { dialog, ipcMain, shell } from 'electron'
+import { clipboard, dialog, ipcMain, shell } from 'electron'
 
-import { IMAGE_MIME_BY_EXTENSION, SUPPORTED_EXTENSIONS } from '@shared/constants'
-import type { ChooseDirectoryOptions, ImportedFilePayload, SaveFileInput, WriteFileInput } from '@shared/types'
-
-const toDataUrl = (extension: string, data: Buffer): string => {
-  const mimeType = IMAGE_MIME_BY_EXTENSION[extension] ?? 'application/octet-stream'
-  return `data:${mimeType};base64,${data.toString('base64')}`
-}
+import { SUPPORTED_EXTENSIONS } from '@shared/constants'
+import type {
+  ChooseDirectoryOptions,
+  CreateTempBinaryFileInput,
+  ImportedFilePayload,
+  OpenInPhotoshopInput,
+  SaveFileInput,
+  WriteFileInput
+} from '@shared/types'
+import { buildImportedFilePayload, isSupportedImageFile } from './imagePayload'
+import {
+  checkForUpdates,
+  downloadUpdate,
+  getUpdateStatus,
+  installDownloadedUpdate,
+  openUpdateDownloadPage
+} from './updater'
 
 const readPathArrayOverride = (name: string): string[] | null => {
   const rawValue = process.env[name]
@@ -28,24 +41,10 @@ const readPathArrayOverride = (name: string): string[] | null => {
   }
 }
 
-const isSupportedImageFile = (filePath: string): boolean => {
-  const extension = path.extname(filePath).slice(1).toLowerCase()
-  return SUPPORTED_EXTENSIONS.includes(extension as (typeof SUPPORTED_EXTENSIONS)[number])
-}
-
 const readFilePayload = async (filePath: string): Promise<ImportedFilePayload> => {
   const stat = await fs.stat(filePath)
-  const extension = path.extname(filePath).slice(1).toLowerCase()
   const data = await fs.readFile(filePath)
-
-  return {
-    dataUrl: toDataUrl(extension, data),
-    extension,
-    mimeType: IMAGE_MIME_BY_EXTENSION[extension] ?? 'application/octet-stream',
-    name: path.basename(filePath),
-    path: filePath,
-    size: stat.size
-  }
+  return buildImportedFilePayload({ data, filePath, size: stat.size })
 }
 
 const flattenPaths = async (paths: string[]): Promise<string[]> => {
@@ -90,6 +89,100 @@ const loadSupportedFiles = async (paths: string[]): Promise<ImportedFilePayload[
 
   const readablePaths = existing.filter((item) => item.exists && isSupportedImageFile(item.filePath))
   return Promise.all(readablePaths.map((item) => readFilePayload(item.filePath)))
+}
+
+const readClipboardImagePayload = (): ImportedFilePayload | null => {
+  const pngFormat = clipboard.availableFormats().find((format) => {
+    const normalized = format.toLowerCase()
+    return normalized === 'png' || normalized === 'image/png' || normalized === 'public.png'
+  })
+
+  if (pngFormat) {
+    const pngBuffer = clipboard.readBuffer(pngFormat)
+    if (pngBuffer.byteLength > 0) {
+      return {
+        dataUrl: `data:image/png;base64,${pngBuffer.toString('base64')}`,
+        extension: 'png',
+        mimeType: 'image/png',
+        name: `clipboard-image-${Date.now()}.png`,
+        path: '',
+        size: pngBuffer.byteLength
+      }
+    }
+  }
+
+  const image = clipboard.readImage()
+  if (image.isEmpty()) {
+    return null
+  }
+
+  const pngBuffer = image.toPNG()
+  return {
+    dataUrl: `data:image/png;base64,${pngBuffer.toString('base64')}`,
+    extension: 'png',
+    mimeType: 'image/png',
+    name: `clipboard-image-${Date.now()}.png`,
+    path: '',
+    size: pngBuffer.byteLength
+  }
+}
+
+const INVALID_TEMP_FILE_CHARACTERS = new Set(['<', '>', ':', '"', '/', '\\', '|', '?', '*'])
+
+const sanitizeTempFileName = (fileName: string): string => {
+  const trimmed = fileName.trim()
+  const withoutUnsafeCharacters = Array.from(trimmed, (character) => {
+    const codePoint = character.charCodeAt(0)
+    return codePoint <= 31 || INVALID_TEMP_FILE_CHARACTERS.has(character) ? '_' : character
+  }).join('')
+  return withoutUnsafeCharacters || 'edited-frame.png'
+}
+
+const normalizeTempExtension = (extension?: string): string => {
+  const normalized = (extension ?? 'png').replace(/^\.+/, '').trim().toLowerCase()
+  return normalized || 'png'
+}
+
+const createTempBinaryFile = async (input: CreateTempBinaryFileInput): Promise<{ filePath: string; modifiedTimeMs: number }> => {
+  const extension = normalizeTempExtension(input.extension)
+  const safeFileName = sanitizeTempFileName(input.fileName)
+  const fileNameBase = path.parse(safeFileName).name || 'edited-frame'
+  const tempDirectory = path.join(os.tmpdir(), 'SpriteSheetTool', 'frame-edits')
+  const targetPath = path.join(tempDirectory, `${fileNameBase}-${randomUUID()}.${extension}`)
+
+  await fs.mkdir(tempDirectory, { recursive: true })
+  await fs.writeFile(targetPath, Buffer.from(input.data))
+
+  const stat = await fs.stat(targetPath)
+  return {
+    filePath: targetPath,
+    modifiedTimeMs: stat.mtimeMs
+  }
+}
+
+const openFileInPhotoshop = async (input: OpenInPhotoshopInput): Promise<void> => {
+  const photoshopStat = await fs.stat(input.photoshopPath).catch(() => null)
+  if (!photoshopStat?.isFile()) {
+    throw new Error('未找到 Photoshop 可执行文件，请先在设置里重新选择路径。')
+  }
+
+  const fileStat = await fs.stat(input.filePath).catch(() => null)
+  if (!fileStat?.isFile()) {
+    throw new Error('未找到要编辑的帧文件。')
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(input.photoshopPath, [input.filePath], {
+      detached: true,
+      stdio: 'ignore'
+    })
+
+    child.once('error', reject)
+    child.once('spawn', () => {
+      child.unref()
+      resolve()
+    })
+  })
 }
 
 export const registerIpcHandlers = (): void => {
@@ -140,6 +233,8 @@ export const registerIpcHandlers = (): void => {
       })
     )
   })
+
+  ipcMain.handle('clipboard:read-image', async () => readClipboardImagePayload())
 
   ipcMain.handle('directory:load', async (_event, dirPath: string) => {
     const files = await flattenPaths([dirPath])
@@ -214,4 +309,32 @@ export const registerIpcHandlers = (): void => {
     await fs.writeFile(input.filePath, Buffer.from(input.data))
     return input.filePath
   })
+
+  ipcMain.handle('file:create-temp-binary', async (_event, input: CreateTempBinaryFileInput) => createTempBinaryFile(input))
+
+  ipcMain.handle('path:get-modified-time', async (_event, filePath: string) => {
+    const stat = await fs.stat(filePath).catch(() => null)
+    return stat?.isFile() ? stat.mtimeMs : null
+  })
+
+  ipcMain.handle('photoshop:choose', async (_event, defaultPath?: string) => {
+    const result = await dialog.showOpenDialog({
+      defaultPath,
+      filters: process.platform === 'win32' ? [{ extensions: ['exe'], name: '应用程序' }] : undefined,
+      properties: ['openFile'],
+      title: '选择 Photoshop 可执行文件'
+    })
+
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle('photoshop:open-file', async (_event, input: OpenInPhotoshopInput) => {
+    await openFileInPhotoshop(input)
+  })
+
+  ipcMain.handle('updates:get-status', async () => getUpdateStatus())
+  ipcMain.handle('updates:check', async () => checkForUpdates())
+  ipcMain.handle('updates:download', async () => downloadUpdate())
+  ipcMain.handle('updates:install', async () => installDownloadedUpdate())
+  ipcMain.handle('updates:open-download-page', async () => openUpdateDownloadPage())
 }
