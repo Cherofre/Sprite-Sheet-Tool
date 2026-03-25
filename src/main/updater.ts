@@ -24,6 +24,50 @@ interface GitHubLatestReleaseResponse {
   tag_name?: string
 }
 
+const normalizeErrorText = (value: string): string => value.replace(/\s+/g, ' ').trim()
+
+const isLikelyPrivateGitHubReleaseError = (value: string): boolean =>
+  /github\.com|api\.github\.com|releases\.atom|latest\.yml/i.test(value) && /\b(401|403|404)\b/.test(value)
+
+const isLikelyNetworkError = (value: string): boolean =>
+  /fetch failed|network|socket|timed out|timeout|ENOTFOUND|ECONNRESET|ECONNREFUSED|EAI_AGAIN/i.test(value)
+
+const buildUpdateAccessErrorMessage = (mode: UpdateMode): string =>
+  mode === 'installed'
+    ? '无法从 GitHub 检查安装版更新。当前仓库或 Release 可能仍是私有的，或更新文件还未公开。你可以先打开发布页手动下载最新版。'
+    : '无法从 GitHub 检查便携版更新。当前仓库或 Release 可能仍是私有的，或下载资源还未公开。你可以先打开发布页手动下载最新版。'
+
+const formatUpdateErrorMessage = (error: unknown, mode: UpdateMode): string => {
+  const rawMessage = error instanceof Error ? error.message : ''
+  const normalized = normalizeErrorText(rawMessage)
+
+  if (!normalized) {
+    return '检查更新失败，请稍后重试。'
+  }
+
+  if (isLikelyPrivateGitHubReleaseError(normalized)) {
+    return buildUpdateAccessErrorMessage(mode)
+  }
+
+  if (/GitHub 返回 (401|403|404)/.test(normalized)) {
+    return buildUpdateAccessErrorMessage(mode)
+  }
+
+  if (/latest\.yml|\.blockmap|setup\.exe/i.test(normalized) && /\b404\b/.test(normalized)) {
+    return '检测到发布页，但更新文件暂时不可访问。请确认 latest.yml、setup.exe 和 blockmap 已上传到公开 Release。'
+  }
+
+  if (isLikelyNetworkError(normalized)) {
+    return '网络连接失败，暂时无法检查更新，请稍后再试。'
+  }
+
+  if (normalized.length > 160) {
+    return `${normalized.slice(0, 160)}...`
+  }
+
+  return normalized
+}
+
 const normalizeVersion = (value: string | null | undefined): string => value?.trim().replace(/^v/i, '') ?? ''
 
 const parseVersionParts = (value: string): number[] =>
@@ -193,7 +237,8 @@ const configureAutoUpdater = (): void => {
       canDownload: false,
       canInstall: false,
       downloadProgressPercent: null,
-      message: error.message || '检查更新失败，请稍后重试。',
+      downloadUrl: GITHUB_RELEASES_PAGE_URL,
+      message: formatUpdateErrorMessage(error, 'installed'),
       phase: 'error'
     })
   })
@@ -288,7 +333,8 @@ export const checkForUpdates = async (): Promise<UpdateStatus> => {
         canDownload: false,
         canInstall: false,
         downloadProgressPercent: null,
-        message: error instanceof Error ? error.message : '检查更新失败，请稍后重试。',
+        downloadUrl: GITHUB_RELEASES_PAGE_URL,
+        message: formatUpdateErrorMessage(error, 'portable'),
         phase: 'error'
       })
     }
@@ -315,7 +361,8 @@ export const checkForUpdates = async (): Promise<UpdateStatus> => {
       canDownload: false,
       canInstall: false,
       downloadProgressPercent: null,
-      message: error instanceof Error ? error.message : '检查更新失败，请稍后重试。',
+      downloadUrl: GITHUB_RELEASES_PAGE_URL,
+      message: formatUpdateErrorMessage(error, 'installed'),
       phase: 'error'
     })
   }
@@ -344,7 +391,8 @@ export const downloadUpdate = async (): Promise<UpdateStatus> => {
       canDownload: status.phase === 'available',
       canInstall: false,
       downloadProgressPercent: null,
-      message: error instanceof Error ? error.message : '下载更新失败，请稍后重试。',
+      downloadUrl: GITHUB_RELEASES_PAGE_URL,
+      message: formatUpdateErrorMessage(error, 'installed'),
       phase: 'error'
     })
   }

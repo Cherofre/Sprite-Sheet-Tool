@@ -62,9 +62,9 @@ const getSecondaryAction = (
     }
   }
 
-  if (status.mode === 'portable' && status.phase === 'available' && status.downloadUrl) {
+  if (status.downloadUrl && (status.phase === 'available' || status.phase === 'error')) {
     return {
-      label: '打开下载页'
+      label: status.phase === 'error' ? '打开发布页' : '打开下载页'
     }
   }
 
@@ -94,7 +94,9 @@ export function SettingsPanel({
     updateStatus.mode === 'installed'
       ? updateStatus.canInstall
         ? onInstallDownloadedUpdate
-        : onDownloadUpdate
+        : updateStatus.canDownload
+          ? onDownloadUpdate
+          : onOpenUpdateDownloadPage
       : onOpenUpdateDownloadPage
 
   return createPortal(
@@ -208,7 +210,11 @@ export function SettingsPanel({
             {secondaryAction ? (
               <button
                 className="secondary-button"
-                disabled={isUpdateActionPending && updateStatus.phase !== 'available' && updateStatus.phase !== 'downloaded'}
+                disabled={
+                  updateStatus.canDownload || updateStatus.canInstall
+                    ? isUpdateActionPending && updateStatus.phase !== 'available' && updateStatus.phase !== 'downloaded'
+                    : false
+                }
                 onClick={secondaryActionHandler}
                 type="button"
               >
