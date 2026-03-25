@@ -61,12 +61,12 @@ npm run package:win
 
 需要注意：
 - 正式 release 的依据是 `tag`，不是分支名本身
-- 分支负责整理和收口，`v1.0.2` 这类 `tag` 才是真正对应 GitHub Release 的版本点
+- 分支负责整理和收口，`v1.0.3` 这类 `tag` 才是真正对应 GitHub Release 的版本点
 - 如果发布线补了正式修复，记得把这些修复同步回 `master`
 
 完整步骤见：
 - [发布流程说明](docs/RELEASE_WORKFLOW.md)
-- [v1.0.2 Release Notes 草案](docs/RELEASE_NOTES_v1.0.2.md)
+- [v1.0.3 Release Notes 草案](docs/RELEASE_NOTES_v1.0.3.md)
 - [Windows 签名与打包说明](docs/RELEASE_SIGNING.md)
 
 ## GitHub Actions 发布
@@ -74,7 +74,7 @@ npm run package:win
 - [windows-release.yml](.github/workflows/windows-release.yml)
 
 行为如下：
-- 推送 `v1.0.2` 这类 tag 时，会自动构建并发布 GitHub Release
+- 推送 `v1.0.3` 这类 tag 时，会自动构建并发布 GitHub Release
 - 手动触发时，也可以额外勾选是否附带旧式单文件 portable
 
 ## 签名
