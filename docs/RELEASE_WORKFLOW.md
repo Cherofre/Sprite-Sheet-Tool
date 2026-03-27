@@ -17,7 +17,9 @@
 1. 在 `master` 上完成功能开发、测试和试验性修改
 2. 准备发版时，把需要对外发布的内容整理到 `codex/sst_v1`
 3. 在 `codex/sst_v1` 上更新版本号、README、release notes 和发布相关配置
-4. 运行发布前检查
+4. 先写对应版本的中文发布说明，文件名固定为 `docs/RELEASE_NOTES_v版本号.md`
+   例如：`docs/RELEASE_NOTES_v1.0.4.md`
+5. 运行发布前检查
 
 ```powershell
 npm run typecheck
@@ -26,34 +28,39 @@ npm run build
 npm run package:win
 ```
 
-5. 确认 `release` 目录里的关键产物已经生成
+6. 确认 `release` 目录里的关键产物已经生成
 
 必须包含：
-- `Sprite-Sheet-Tool-1.0.3-portable-dir.zip`
-- `Sprite-Sheet-Tool-1.0.3-setup.exe`
-- `Sprite-Sheet-Tool-1.0.3-setup.exe.blockmap`
+- `Sprite-Sheet-Tool-1.0.4-portable-dir.zip`
+- `Sprite-Sheet-Tool-1.0.4-setup.exe`
+- `Sprite-Sheet-Tool-1.0.4-setup.exe.blockmap`
 - `latest.yml`
 
-6. 在 `codex/sst_v1` 当前提交上打 tag，例如：
+7. 在 `codex/sst_v1` 当前提交上打 tag，例如：
 
 ```powershell
-git tag v1.0.3
+git tag v1.0.4
 ```
 
-7. 推送发布分支和 tag：
+8. 推送发布分支和 tag：
 
 ```powershell
 git push origin codex/sst_v1
-git push origin v1.0.3
+git push origin v1.0.4
 ```
 
-8. GitHub Actions 会根据 `.github/workflows/windows-release.yml` 自动构建并发布 Release
+9. GitHub Actions 会根据 `.github/workflows/windows-release.yml` 自动构建并发布 Release
+
+## Release Notes 规则
+- Release 页面正文统一使用中文。
+- 每次发版前都要新增一份对应版本的 release notes 文件，例如 `docs/RELEASE_NOTES_v1.0.4.md`。
+- 发布工作流会优先读取这份文件作为 GitHub Release 正文；如果文件缺失，workflow 会直接失败，避免忘记写中文说明。
 
 ## 手动补传资产时要注意
 如果需要手动在 GitHub Release 页面上传文件，至少要带这 4 个：
-- `Sprite-Sheet-Tool-1.0.3-portable-dir.zip`
-- `Sprite-Sheet-Tool-1.0.3-setup.exe`
-- `Sprite-Sheet-Tool-1.0.3-setup.exe.blockmap`
+- `Sprite-Sheet-Tool-1.0.4-portable-dir.zip`
+- `Sprite-Sheet-Tool-1.0.4-setup.exe`
+- `Sprite-Sheet-Tool-1.0.4-setup.exe.blockmap`
 - `latest.yml`
 
 其中：

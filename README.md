@@ -63,10 +63,11 @@ npm run package:win
 - 正式 release 的依据是 `tag`，不是分支名本身
 - 分支负责整理和收口，`v1.0.3` 这类 `tag` 才是真正对应 GitHub Release 的版本点
 - 如果发布线补了正式修复，记得把这些修复同步回 `master`
+- GitHub Release 正文统一使用中文，并为每个版本单独准备 `docs/RELEASE_NOTES_v版本号.md`
 
 完整步骤见：
 - [发布流程说明](docs/RELEASE_WORKFLOW.md)
-- [v1.0.3 Release Notes 草案](docs/RELEASE_NOTES_v1.0.3.md)
+- [v1.0.4 Release Notes 草案](docs/RELEASE_NOTES_v1.0.4.md)
 - [Windows 签名与打包说明](docs/RELEASE_SIGNING.md)
 
 ## GitHub Actions 发布

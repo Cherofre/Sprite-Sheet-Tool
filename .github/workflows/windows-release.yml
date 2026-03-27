@@ -1,4 +1,4 @@
-name: Windows Release
+﻿name: Windows Release
 
 on:
   push:
@@ -57,11 +57,22 @@ jobs:
             release/latest.yml
           if-no-files-found: error
 
+      - name: Verify Chinese release notes file
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        run: |
+          $tagName = "${{ github.ref_name }}"
+          $releaseNotesPath = "docs/RELEASE_NOTES_${tagName}.md"
+          if (-not (Test-Path $releaseNotesPath)) {
+            throw "缺少 release notes 文件：$releaseNotesPath。请先补充对应版本的中文发布说明。"
+          }
+          "RELEASE_NOTES_PATH=$releaseNotesPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Publish GitHub Release assets
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: ${{ env.RELEASE_NOTES_PATH }}
           files: |
             release/*-portable-dir.zip
             release/*-portable-single.exe
