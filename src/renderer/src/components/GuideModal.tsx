@@ -176,7 +176,8 @@ export function GuideModal({
   }
 
   const header = getGuideHeader(reason, currentVersion)
-  const showAutoOptions = reason !== 'manual'
+  const isManualMode = reason === 'manual'
+  const showAutoOptions = !isManualMode
 
   let sectionContent = renderQuickStart()
   if (activeSection === 'context-actions') {
@@ -190,7 +191,7 @@ export function GuideModal({
   return createPortal(
     <div className="modal-overlay">
       <div
-        className="modal-card guide-modal-card"
+        className={`modal-card guide-modal-card${isManualMode ? ' guide-modal-card-manual' : ''}`}
         onClick={(event) => {
           event.stopPropagation()
         }}
@@ -207,7 +208,7 @@ export function GuideModal({
         </div>
 
         <div className="guide-layout">
-          <nav className="guide-nav" aria-label="操作说明分区">
+          <nav className={`guide-nav${isManualMode ? ' guide-nav-manual' : ''}`} aria-label="操作说明分区">
             {sections.map((section) => (
               <button
                 key={section.id}
@@ -218,39 +219,35 @@ export function GuideModal({
                 {section.label}
               </button>
             ))}
+
+            {isManualMode ? <div className="guide-floating-hint">以后按 F1 可以再次打开这份说明。</div> : null}
           </nav>
 
           <section className="guide-content">{sectionContent}</section>
         </div>
 
-        <div className="guide-footer">
-          <div className="guide-footer-meta">
-            {showAutoOptions ? (
-              <>
-                <label className="guide-checkbox">
-                  <input checked={autoShowEnabled} onChange={(event) => onToggleAutoShow(event.target.checked)} type="checkbox" />
-                  <span>以后更新后仍自动显示</span>
-                </label>
-                <button className="ghost-button guide-inline-button" onClick={onDisableAutoShow} type="button">
-                  不再自动弹出
-                </button>
-              </>
-            ) : (
-              <p className="muted-copy">以后按 F1 可以再次打开这份说明。</p>
-            )}
-          </div>
+        {showAutoOptions ? (
+          <div className="guide-footer">
+            <div className="guide-footer-meta">
+              <label className="guide-checkbox">
+                <input checked={autoShowEnabled} onChange={(event) => onToggleAutoShow(event.target.checked)} type="checkbox" />
+                <span>以后更新后仍自动显示</span>
+              </label>
+              <button className="ghost-button guide-inline-button" onClick={onDisableAutoShow} type="button">
+                不再自动弹出
+              </button>
+            </div>
 
-          <div className="guide-footer-actions">
-            <button className="secondary-button" onClick={onClose} type="button">
-              {showAutoOptions ? '以后按 F1 再看' : '关闭'}
-            </button>
-            {showAutoOptions ? (
+            <div className="guide-footer-actions">
+              <button className="secondary-button" onClick={onClose} type="button">
+                以后按 F1 再看
+              </button>
               <button className="primary-button" onClick={onConfirm} type="button">
                 开始使用
               </button>
-            ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     </div>,
     document.body
