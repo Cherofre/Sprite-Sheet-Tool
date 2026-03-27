@@ -33,11 +33,13 @@ import { encodeGif } from '@lib/image/gif'
 
 import { ExportPanel } from './components/ExportPanel'
 import { FrameTimeline } from './components/FrameTimeline'
+import { type GuideModalReason, GuideModal, type GuideSectionId } from './components/GuideModal'
 import { ImportPanel } from './components/ImportPanel'
 import { PlaybackPanel } from './components/PlaybackPanel'
 import { PreviewStage } from './components/PreviewStage'
 import { type UiPreferences, SettingsPanel } from './components/SettingsPanel'
 import { SheetPanel } from './components/SheetPanel'
+import { UpdateReminderCard } from './components/UpdateReminderCard'
 import { useCanRedo, useCanUndo, useEditorStore } from './store/editorStore'
 
 const OPERATION_CANCELLED = '__OPERATION_CANCELLED__'
@@ -46,12 +48,16 @@ const EXTERNAL_EDIT_POLL_INTERVAL_MS = 1200
 const EXPORT_ENCODE_BATCH_SIZE = 8
 const EAGER_SINGLE_IMAGE_PROMPT_CONFIDENCE = 0.5
 const SINGLE_IMAGE_MODAL_CANDIDATE_LIMIT = 4
+const UPDATE_STATUS_POLL_INTERVAL_MS = 800
 const UI_PREFERENCES_KEY = 'sprite-sheet-tool.ui-preferences.v1'
+const GUIDE_LAST_SEEN_VERSION_KEY = 'sprite-sheet-tool.guide.last-seen-version.v1'
+const IGNORED_UPDATE_VERSION_KEY = 'sprite-sheet-tool.updates.ignored-version.v1'
 const PLAYBACK_PREFERENCES_KEY = 'sprite-sheet-tool.playback-preferences.v1'
 const EXPORT_PREFERENCES_KEY = 'sprite-sheet-tool.export-preferences.v1'
 const DEFAULT_UI_PREFERENCES: UiPreferences = {
   drawerBlurDelayMs: 400,
   drawerFixedMode: 'none',
+  guideAutoShow: true,
   photoshopPath: ''
 }
 const DEFAULT_UPDATE_STATUS: UpdateStatus = {
@@ -100,6 +106,8 @@ interface ExportNotice {
   label: string
   targetPath: string
 }
+
+type GuideDismissMode = 'never-auto-show' | 'normal'
 
 type ImportMode = 'append' | 'replace' | 'replace-current'
 
@@ -183,6 +191,11 @@ const shortcutRows = [
   ['Ctrl/Cmd + ,', '打开设置'],
   ['Esc', '关闭说明或取消当前任务']
 ] as const
+
+const guideShortcutRows = shortcutRows.map(([shortcut, description]) => ({
+  description,
+  shortcut
+}))
 
 const joinPath = (directory: string, fileName: string): string => `${directory.replace(/[\\/]+$/, '')}/${fileName}`
 
@@ -486,6 +499,19 @@ const buildSheetGeometrySignature = (
   ].join('|')
 }
 
+const loadStoredStringPreference = (key: string): string | null => {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(key)
+    return rawValue?.trim() ? rawValue.trim() : null
+  } catch {
+    return null
+  }
+}
+
 const loadUiPreferences = (): UiPreferences => {
   if (typeof window === 'undefined') {
     return DEFAULT_UI_PREFERENCES
@@ -505,6 +531,7 @@ const loadUiPreferences = (): UiPreferences => {
         parsed.drawerFixedMode === 'left' || parsed.drawerFixedMode === 'right' || parsed.drawerFixedMode === 'both'
           ? parsed.drawerFixedMode
           : DEFAULT_UI_PREFERENCES.drawerFixedMode,
+      guideAutoShow: typeof parsed.guideAutoShow === 'boolean' ? parsed.guideAutoShow : DEFAULT_UI_PREFERENCES.guideAutoShow,
       photoshopPath: typeof parsed.photoshopPath === 'string' ? parsed.photoshopPath.trim() : DEFAULT_UI_PREFERENCES.photoshopPath
     }
   } catch {
@@ -670,7 +697,8 @@ export default function App() {
   const [drawerLocks, setDrawerLocks] = useState<DrawerOpenState>({ left: false, right: false })
   const [drawerOpen, setDrawerOpen] = useState<DrawerOpenState>({ left: false, right: false })
   const [isExportPanelOpen, setIsExportPanelOpen] = useState(false)
-  const [isHelpOpen, setIsHelpOpen] = useState(false)
+  const [guideReason, setGuideReason] = useState<GuideModalReason | null>(null)
+  const [guideSection, setGuideSection] = useState<GuideSectionId>('quick-start')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [pingPongDirection, setPingPongDirection] = useState<1 | -1>(1)
   const [isWindowDragActive, setIsWindowDragActive] = useState(false)
@@ -682,6 +710,9 @@ export default function App() {
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => loadUiPreferences())
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(DEFAULT_UPDATE_STATUS)
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false)
+  const [lastSeenGuideVersion, setLastSeenGuideVersion] = useState<string | null>(() => loadStoredStringPreference(GUIDE_LAST_SEEN_VERSION_KEY))
+  const [ignoredUpdateVersion, setIgnoredUpdateVersion] = useState<string | null>(() => loadStoredStringPreference(IGNORED_UPDATE_VERSION_KEY))
+  const [dismissedUpdateVersionForSession, setDismissedUpdateVersionForSession] = useState<string | null>(null)
   const [persistedPlaybackPreferences] = useState<PersistedPlaybackPreferences>(() => loadPlaybackPreferences())
   const [persistedExportPreferences] = useState<PersistedExportPreferences>(() => loadExportPreferences())
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
@@ -697,9 +728,12 @@ export default function App() {
   const drawerOpenTimersRef = useRef<{ left: number | null; right: number | null }>({ left: null, right: null })
   const drawerRefs = useRef<{ left: HTMLElement | null; right: HTMLElement | null }>({ left: null, right: null })
   const didHydratePersistentPreferencesRef = useRef(false)
+  const didAttemptStartupUpdateCheckRef = useRef(false)
   const externalEditPollActiveRef = useRef(false)
   const externalEditSessionsRef = useRef<Map<string, ExternalEditSession>>(new Map())
   const windowDragDepthRef = useRef(0)
+  const currentAppVersion = updateStatus.currentVersion !== '...' ? updateStatus.currentVersion : null
+  const isGuideOpen = guideReason !== null
 
   useEffect(() => {
     if (!pendingSingleImageImportPrompt) {
@@ -811,6 +845,32 @@ export default function App() {
   }, [uiPreferences])
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    if (lastSeenGuideVersion) {
+      window.localStorage.setItem(GUIDE_LAST_SEEN_VERSION_KEY, lastSeenGuideVersion)
+      return
+    }
+
+    window.localStorage.removeItem(GUIDE_LAST_SEEN_VERSION_KEY)
+  }, [lastSeenGuideVersion])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    if (ignoredUpdateVersion) {
+      window.localStorage.setItem(IGNORED_UPDATE_VERSION_KEY, ignoredUpdateVersion)
+      return
+    }
+
+    window.localStorage.removeItem(IGNORED_UPDATE_VERSION_KEY)
+  }, [ignoredUpdateVersion])
+
+  useEffect(() => {
     let isCancelled = false
 
     const loadUpdateStatus = async () => {
@@ -837,6 +897,85 @@ export default function App() {
       isCancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (dismissedUpdateVersionForSession && dismissedUpdateVersionForSession !== updateStatus.latestVersion) {
+      setDismissedUpdateVersionForSession(null)
+    }
+  }, [dismissedUpdateVersionForSession, updateStatus.latestVersion])
+
+  useEffect(() => {
+    if (!currentAppVersion || !uiPreferences.guideAutoShow || isGuideOpen || isSettingsOpen || pendingImportPrompt || pendingSingleImageImportPrompt) {
+      return
+    }
+
+    if (lastSeenGuideVersion === currentAppVersion) {
+      return
+    }
+
+    setGuideSection('quick-start')
+    setGuideReason(lastSeenGuideVersion ? 'update' : 'welcome')
+  }, [currentAppVersion, guideReason, isGuideOpen, isSettingsOpen, lastSeenGuideVersion, pendingImportPrompt, pendingSingleImageImportPrompt, uiPreferences.guideAutoShow])
+
+  useEffect(() => {
+    if (didAttemptStartupUpdateCheckRef.current || !currentAppVersion || isGuideOpen || isSettingsOpen || pendingImportPrompt || pendingSingleImageImportPrompt) {
+      return
+    }
+
+    if (!updateStatus.canCheck || updateStatus.mode === 'disabled') {
+      return
+    }
+
+    didAttemptStartupUpdateCheckRef.current = true
+    let isCancelled = false
+
+    const runStartupUpdateCheck = async () => {
+      try {
+        const nextStatus = await window.desktopApi.checkForAppUpdates()
+        if (!isCancelled && nextStatus.phase !== 'error') {
+          setUpdateStatus(nextStatus)
+        }
+      } catch {
+        // Silent startup checks should not interrupt the user flow.
+      }
+    }
+
+    void runStartupUpdateCheck()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [currentAppVersion, isGuideOpen, isSettingsOpen, pendingImportPrompt, pendingSingleImageImportPrompt, updateStatus.canCheck, updateStatus.mode])
+
+  useEffect(() => {
+    if (!isUpdateActionPending && updateStatus.phase !== 'checking' && updateStatus.phase !== 'downloading') {
+      return
+    }
+
+    let isCancelled = false
+
+    const pollUpdateStatus = async () => {
+      try {
+        const nextStatus = await window.desktopApi.getUpdateStatus()
+        if (!isCancelled) {
+          setUpdateStatus(nextStatus)
+        }
+      } catch {
+        // Keep the current status when polling fails; the active action will surface the final error.
+      }
+    }
+
+    void pollUpdateStatus()
+
+    const timer = window.setInterval(() => {
+      void pollUpdateStatus()
+    }, UPDATE_STATUS_POLL_INTERVAL_MS)
+
+    return () => {
+      isCancelled = true
+      window.clearInterval(timer)
+    }
+  }, [isUpdateActionPending, updateStatus.phase])
 
   useEffect(() => {
     const liveFrameIds = new Set(frames.map((frame) => frame.id))
@@ -1028,6 +1167,35 @@ export default function App() {
     }))
   }
 
+  const closeGuide = useEffectEvent((mode: GuideDismissMode = 'normal') => {
+    if (guideReason !== 'manual' && currentAppVersion) {
+      setLastSeenGuideVersion(currentAppVersion)
+    }
+
+    if (mode === 'never-auto-show') {
+      updateUiPreferences({ guideAutoShow: false })
+    }
+
+    setGuideReason(null)
+  })
+
+  const openGuide = useEffectEvent((reason: GuideModalReason, section: GuideSectionId = 'quick-start') => {
+    setGuideSection(section)
+    setGuideReason(reason)
+  })
+
+  const shouldShowUpdateReminder =
+    !isGuideOpen &&
+    !isSettingsOpen &&
+    !isBusy &&
+    !pendingImportPrompt &&
+    !pendingSingleImageImportPrompt &&
+    Boolean(updateStatus.latestVersion) &&
+    updateStatus.latestVersion !== ignoredUpdateVersion &&
+    (updateStatus.phase === 'downloaded' ||
+      (updateStatus.latestVersion !== dismissedUpdateVersionForSession &&
+        (updateStatus.phase === 'available' || updateStatus.phase === 'downloading')))
+
   const runUpdateAction = useEffectEvent(async <T extends UpdateStatus | void>(action: () => Promise<T>): Promise<T | undefined> => {
     setIsUpdateActionPending(true)
 
@@ -1050,10 +1218,28 @@ export default function App() {
   })
 
   const handleCheckForUpdates = useEffectEvent(async () => {
+    setUpdateStatus((current) => ({
+      ...current,
+      canCheck: false,
+      canDownload: false,
+      canInstall: false,
+      downloadProgressPercent: null,
+      message: '正在检查更新...',
+      phase: 'checking'
+    }))
     await runUpdateAction(() => window.desktopApi.checkForAppUpdates())
   })
 
   const handleDownloadUpdate = useEffectEvent(async () => {
+    setUpdateStatus((current) => ({
+      ...current,
+      canCheck: false,
+      canDownload: false,
+      canInstall: false,
+      downloadProgressPercent: 0,
+      message: '正在下载更新...',
+      phase: 'downloading'
+    }))
     await runUpdateAction(() => window.desktopApi.downloadAppUpdate())
   })
 
@@ -1083,6 +1269,40 @@ export default function App() {
     } finally {
       setIsUpdateActionPending(false)
     }
+  })
+
+  const handleDismissUpdateReminder = useEffectEvent(() => {
+    if (updateStatus.phase === 'downloaded') {
+      return
+    }
+
+    if (updateStatus.latestVersion) {
+      setDismissedUpdateVersionForSession(updateStatus.latestVersion)
+    }
+  })
+
+  const handleIgnoreUpdateReminderVersion = useEffectEvent(() => {
+    if (!updateStatus.latestVersion) {
+      return
+    }
+
+    setIgnoredUpdateVersion(updateStatus.latestVersion)
+    setDismissedUpdateVersionForSession(updateStatus.latestVersion)
+    setStatusMessage(`已忽略 v${updateStatus.latestVersion} 的更新提醒。`)
+  })
+
+  const handleUpdateReminderPrimaryAction = useEffectEvent(async () => {
+    if (updateStatus.mode === 'installed') {
+      if (updateStatus.canInstall) {
+        await handleInstallDownloadedUpdate()
+        return
+      }
+
+      await handleDownloadUpdate()
+      return
+    }
+
+    await handleOpenUpdateDownloadPage()
   })
 
   const choosePhotoshopExecutable = useEffectEvent(async (): Promise<string | null> => {
@@ -2143,7 +2363,11 @@ export default function App() {
   const handleGlobalKeydown = useEffectEvent((event: KeyboardEvent) => {
     if (event.key === 'F1') {
       event.preventDefault()
-      setIsHelpOpen((current) => !current)
+      if (isGuideOpen) {
+        closeGuide()
+      } else {
+        openGuide('manual', 'shortcuts')
+      }
       return
     }
 
@@ -2153,13 +2377,13 @@ export default function App() {
       return
     }
 
-    if (event.key === 'Escape' && isHelpOpen) {
+    if (event.key === 'Escape' && isGuideOpen) {
       event.preventDefault()
-      setIsHelpOpen(false)
+      closeGuide()
       return
     }
 
-    if (isHelpOpen) {
+    if (isGuideOpen) {
       return
     }
 
@@ -2544,8 +2768,19 @@ export default function App() {
           <button className="ghost-button" disabled={!canClear || isBusy} onClick={handleClearWorkspace} type="button">
             清空
           </button>
-          <button className="ghost-button header-button" onClick={() => setIsHelpOpen((current) => !current)} type="button">
-            <span>快捷键说明</span>
+          <button
+            className="ghost-button header-button"
+            onClick={() => {
+              if (isGuideOpen) {
+                closeGuide()
+                return
+              }
+
+              openGuide('manual')
+            }}
+            type="button"
+          >
+            <span>操作说明</span>
             <span className="shortcut-tag">F1</span>
           </button>
           <button className="ghost-button icon-only-button" onClick={() => setIsSettingsOpen(true)} title="设置" type="button">
@@ -2946,46 +3181,19 @@ export default function App() {
         </div>
       ) : null}
 
-      {isHelpOpen ? (
-        <div className="modal-overlay" onClick={() => setIsHelpOpen(false)}>
-          <div
-            className="modal-card"
-            onClick={(event) => {
-              event.stopPropagation()
-            }}
-          >
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">帮助</span>
-                <h2>快捷键与说明</h2>
-              </div>
-              <button className="secondary-button" onClick={() => setIsHelpOpen(false)} type="button">
-                关闭
-              </button>
-            </div>
-
-            <div className="help-grid">
-              {shortcutRows.map(([shortcut, description]) => (
-                <div className="help-row" key={shortcut}>
-                  <kbd>{shortcut}</kbd>
-                  <span>{description}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="hint-card">
-              <span className="eyebrow">补充说明</span>
-              <p>
-                1. `Esc` 会优先关闭当前说明窗口，其次取消正在执行的长任务。
-                <br />
-                2. 图片序列与拆分序列导出如果中途取消，会自动清理这次已写出的半成品文件。
-                <br />
-                3. 在输入框或下拉框里编辑时，快捷键不会抢占你的输入。
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <GuideModal
+        activeSection={guideSection}
+        autoShowEnabled={uiPreferences.guideAutoShow}
+        currentVersion={currentAppVersion ?? updateStatus.currentVersion}
+        isOpen={isGuideOpen}
+        onChangeSection={setGuideSection}
+        onClose={() => closeGuide()}
+        onConfirm={() => closeGuide()}
+        onDisableAutoShow={() => closeGuide('never-auto-show')}
+        onToggleAutoShow={(enabled) => updateUiPreferences({ guideAutoShow: enabled })}
+        reason={guideReason ?? 'manual'}
+        shortcutRows={guideShortcutRows}
+      />
 
       {pendingImportPrompt ? (
         <div className="modal-overlay" onClick={() => closePendingImportPrompt(false)}>
@@ -3296,6 +3504,16 @@ export default function App() {
         onUpdate={updateUiPreferences}
         preferences={uiPreferences}
         updateStatus={updateStatus}
+      />
+
+      <UpdateReminderCard
+        onDismiss={handleDismissUpdateReminder}
+        onIgnoreVersion={handleIgnoreUpdateReminderVersion}
+        onPrimaryAction={() => {
+          void handleUpdateReminderPrimaryAction()
+        }}
+        status={updateStatus}
+        visible={shouldShowUpdateReminder}
       />
 
       {exportNotice ? (

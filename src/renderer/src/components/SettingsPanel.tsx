@@ -7,6 +7,7 @@ export type DrawerFixedMode = 'none' | 'left' | 'right' | 'both'
 export interface UiPreferences {
   drawerBlurDelayMs: number
   drawerFixedMode: DrawerFixedMode
+  guideAutoShow: boolean
   photoshopPath: string
 }
 
@@ -52,6 +53,12 @@ const getSecondaryAction = (
     if (status.canInstall) {
       return {
         label: '安装并重启'
+      }
+    }
+
+    if (status.phase === 'downloading') {
+      return {
+        label: '下载中...'
       }
     }
 
@@ -144,6 +151,16 @@ export function SettingsPanel({
         </div>
 
         <div className="hint-card settings-editor-card">
+          <span className="eyebrow">操作说明</span>
+          <p>首次安装或更新到新版本后，可以自动弹出一份简短说明，集中提示右键入口、快捷键和 Photoshop 往返注意事项。</p>
+
+          <label className="guide-checkbox">
+            <input checked={preferences.guideAutoShow} onChange={(event) => onUpdate({ guideAutoShow: event.target.checked })} type="checkbox" />
+            <span>启动或更新后自动显示操作说明</span>
+          </label>
+        </div>
+
+        <div className="hint-card settings-editor-card">
           <span className="eyebrow">Photoshop</span>
           <p>时间轴和预览区的右键菜单都可以直接把当前帧交给 Photoshop 修改；程序会先准备一份临时 PNG，保存后自动回灌到这一帧。</p>
 
@@ -211,6 +228,7 @@ export function SettingsPanel({
               <button
                 className="secondary-button"
                 disabled={
+                  updateStatus.phase === 'downloading' ||
                   updateStatus.canDownload || updateStatus.canInstall
                     ? isUpdateActionPending && updateStatus.phase !== 'available' && updateStatus.phase !== 'downloaded'
                     : false

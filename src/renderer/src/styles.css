@@ -1961,6 +1961,278 @@ input[type='range']::-webkit-slider-thumb {
   font-size: 0.82rem;
 }
 
+.guide-modal-card {
+  width: min(920px, 100%);
+  max-height: min(78vh, 860px);
+  gap: 1rem;
+  padding: 1rem 1rem 0.95rem;
+}
+
+.guide-modal-header {
+  gap: 1.2rem;
+}
+
+.guide-modal-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.guide-modal-subtitle {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.guide-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 208px) minmax(0, 1fr);
+  gap: 0.95rem;
+  min-height: 0;
+}
+
+.guide-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.guide-nav-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.guide-nav-button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  border-color: rgba(255, 255, 255, 0.11);
+}
+
+.guide-nav-button.active {
+  background: rgba(255, 138, 77, 0.12);
+  color: #ffe8dc;
+  border-color: rgba(255, 138, 77, 0.24);
+}
+
+.guide-content {
+  min-width: 0;
+}
+
+.guide-section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.guide-step-grid,
+.guide-dual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.guide-step-card,
+.guide-panel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.guide-step-card strong,
+.guide-panel-card p,
+.guide-callout-card p {
+  line-height: 1.6;
+}
+
+.guide-panel-card p,
+.guide-callout-card p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+}
+
+.guide-callout-card {
+  border-color: rgba(255, 138, 77, 0.16);
+  background: linear-gradient(180deg, rgba(255, 138, 77, 0.08), rgba(255, 138, 77, 0.03));
+}
+
+.guide-photoshop-card {
+  border-color: rgba(255, 208, 118, 0.18);
+  background: linear-gradient(180deg, rgba(255, 208, 118, 0.11), rgba(255, 208, 118, 0.04));
+}
+
+.guide-bullet-list {
+  margin: 0;
+  padding-left: 1rem;
+  color: var(--text-main);
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+
+.guide-shortcut-grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.guide-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.2rem;
+}
+
+.guide-footer-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.guide-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.guide-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.guide-checkbox input {
+  accent-color: var(--accent);
+}
+
+.guide-inline-button {
+  padding-inline: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+}
+
+.guide-inline-button:hover {
+  background: transparent;
+  border-color: transparent;
+  color: #fff;
+}
+
+.update-reminder-card {
+  position: fixed;
+  top: 4.85rem;
+  right: 1.2rem;
+  z-index: 1065;
+  width: min(360px, calc(100vw - 2.4rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(23, 28, 34, 0.96);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(16px);
+}
+
+.update-reminder-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.update-reminder-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.update-reminder-heading strong {
+  color: #fff;
+  font-size: 0.96rem;
+}
+
+.update-reminder-close {
+  padding: 0.35rem 0.55rem;
+}
+
+.update-reminder-copy {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.update-reminder-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.update-reminder-progress-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.update-reminder-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(255, 138, 77, 0.82), rgba(255, 177, 128, 0.96));
+}
+
+.update-reminder-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.update-reminder-ignore {
+  padding-inline: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+}
+
+.update-reminder-ignore:hover {
+  background: transparent;
+  border-color: transparent;
+  color: #fff;
+}
+
+.update-reminder-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 kbd {
   display: inline-flex;
   align-items: center;
@@ -2066,6 +2338,15 @@ kbd {
   .preview-stage {
     min-height: 360px;
   }
+
+  .guide-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .guide-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -2142,12 +2423,35 @@ kbd {
   .zoom-grid,
   .split-sample-grid,
   .action-grid-three,
-  .recognition-candidate-grid {
+  .recognition-candidate-grid,
+  .guide-step-grid,
+  .guide-dual-grid,
+  .guide-nav {
     grid-template-columns: 1fr;
   }
 
   .help-row {
     grid-template-columns: 1fr;
+  }
+
+  .guide-modal-card {
+    padding: 0.9rem;
+  }
+
+  .guide-footer,
+  .guide-footer-actions,
+  .guide-footer-meta,
+  .update-reminder-footer,
+  .update-reminder-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .update-reminder-card {
+    top: auto;
+    right: 0.8rem;
+    bottom: 0.8rem;
+    width: calc(100vw - 1.6rem);
   }
 
   .export-action-grid,
